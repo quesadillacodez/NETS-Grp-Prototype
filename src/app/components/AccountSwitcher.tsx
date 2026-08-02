@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Check } from 'lucide-react';
 import { getAllUsers, getCurrentUser, switchUser } from '../utils/userStorage';
+import { setSessionUser } from '../utils/authStorage';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AccountSwitcherProps {
@@ -14,7 +15,9 @@ export function AccountSwitcher({ isOpen, onClose }: AccountSwitcherProps) {
 
   const handleSwitch = (userId: string) => {
     switchUser(userId);
-    setCurrentUser(getCurrentUser());
+    const user = getCurrentUser();
+    setSessionUser(user);
+    setCurrentUser(user);
     onClose();
 
     setTimeout(() => window.dispatchEvent(new CustomEvent('userSwitched')), 50);

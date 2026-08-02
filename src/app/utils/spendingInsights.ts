@@ -1,4 +1,4 @@
-import { query, run } from './db';
+import { query } from './db';
 
 // ─── Category derivation ─────────────────────────────────────────────────────
 // Real transactions store category as 'payment' / 'topup', so we derive a
@@ -28,6 +28,12 @@ const KEYWORDS: [SpendCategory, string[]][] = [
   ['Shopping', ['amazon', 'lazada', 'shopee', 'uniqlo', 'zara', 'shop', 'mall', 'store', 'watsons', 'challenger']],
 ];
 
+const SPEND_CATEGORIES = Object.keys(CATEGORY_META) as SpendCategory[];
+
+export function isSpendCategory(value: string): value is SpendCategory {
+  return (SPEND_CATEGORIES as string[]).includes(value);
+}
+
 export function categorizeMerchant(name: string): SpendCategory {
   const n = name.toLowerCase();
   for (const [cat, kws] of KEYWORDS) {
@@ -36,12 +42,21 @@ export function categorizeMerchant(name: string): SpendCategory {
   return 'Other';
 }
 
+// Payments made through the app (split bills, Hangout outings, QR pays) write a
+// real spending category onto the transaction, so trust that over guessing from
+// the merchant name. Seeded/legacy rows store 'payment' or 'topup' instead and
+// still fall back to keyword matching.
+export function resolveSpendCategory(name: string, storedCategory?: string): SpendCategory {
+  if (storedCategory && isSpendCategory(storedCategory)) return storedCategory;
+  return categorizeMerchant(name);
+}
+
 export function categoryColor(cat: SpendCategory): string { return CATEGORY_META[cat].color; }
 export function categoryEmoji(cat: SpendCategory): string { return CATEGORY_META[cat].emoji; }
 
 // ─── Raw spend rows for a user ───────────────────────────────────────────────
 type FlowKind = 'purchase' | 'income' | 'topup' | 'transfer' | 'cashback' | 'refund';
-interface SpendRow { name: string; amount: number; ts: number; kind: FlowKind; }
+interface SpendRow { name: string; amount: number; ts: number; kind: FlowKind; category: SpendCategory; }
 
 export function inferTransactionKind(row: Record<string, unknown>): FlowKind {
   if (row.kind) return String(row.kind) as FlowKind;
@@ -63,7 +78,14 @@ function getSpendRows(userId: string): SpendRow[] {
     amount: Number(r.amount),
     ts: r.created_at != null ? Number(r.created_at) : Date.parse(String(r.date)) || Date.now(),
     kind: inferTransactionKind(r),
+    category: resolveSpendCategory(String(r.name), r.category == null ? undefined : String(r.category)),
   }));
+}
+
+// Anything leaving the wallet counts as spending: merchant purchases plus the
+// outgoing side of a split-bill settlement, which is the user's own share.
+function isSpend(row: SpendRow): boolean {
+  return row.amount < 0 && (row.kind === 'purchase' || row.kind === 'transfer');
 }
 
 function inMonth(ts: number, year: number, month: number): boolean {
@@ -75,11 +97,10 @@ function inMonth(ts: number, year: number, month: number): boolean {
 export interface CategorySlice { name: SpendCategory; amount: number; value: number; color: string; emoji: string; }
 
 export function getCategoryBreakdown(userId: string, year: number, month: number): CategorySlice[] {
-  const rows = getSpendRows(userId).filter((r) => r.kind === 'purchase' && r.amount < 0 && inMonth(r.ts, year, month));
+  const rows = getSpendRows(userId).filter((r) => isSpend(r) && inMonth(r.ts, year, month));
   const totals: Record<string, number> = {};
   rows.forEach((r) => {
-    const cat = categorizeMerchant(r.name);
-    totals[cat] = (totals[cat] || 0) + Math.abs(r.amount);
+    totals[r.category] = (totals[r.category] || 0) + Math.abs(r.amount);
   });
   const grand = Object.values(totals).reduce((s, v) => s + v, 0) || 1;
   return (Object.entries(totals) as [SpendCategory, number][])
@@ -104,7 +125,7 @@ export function getSpendingTrend(userId: string, months = 6): TrendPoint[] {
     let spending = 0, income = 0;
     rows.forEach((r) => {
       if (inMonth(r.ts, y, m)) {
-        if (r.kind === 'purchase' && r.amount < 0) spending += Math.abs(r.amount);
+        if (isSpend(r)) spending += Math.abs(r.amount);
         else if (r.amount > 0) income += r.amount;
       }
     });
@@ -126,13 +147,13 @@ export function getSpendSummary(userId: string, year: number, month: number): Sp
   let spent = 0, moneyIn = 0, earnedIncome = 0, txnCount = 0, spentPrev = 0;
   rows.forEach((r) => {
     if (inMonth(r.ts, year, month)) {
-      if (r.kind === 'purchase' && r.amount < 0) { spent += Math.abs(r.amount); txnCount++; }
+      if (isSpend(r)) { spent += Math.abs(r.amount); txnCount++; }
       else if (r.amount > 0) {
         moneyIn += r.amount;
         if (r.kind === 'income') earnedIncome += r.amount;
       }
     } else if (inMonth(r.ts, prev.getFullYear(), prev.getMonth())) {
-      if (r.kind === 'purchase' && r.amount < 0) spentPrev += Math.abs(r.amount);
+      if (isSpend(r)) spentPrev += Math.abs(r.amount);
     }
   });
   const cats = getCategoryBreakdown(userId, year, month);

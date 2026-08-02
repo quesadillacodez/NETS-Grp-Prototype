@@ -28,11 +28,14 @@ const HangoutsPage = lazy(() => import('./pages/HangoutsPage').then(m => ({ defa
 const RewardsPage = lazy(() => import('./pages/RewardsPage').then(m => ({ default: m.RewardsPage })));
 const WrappedPage = lazy(() => import('./pages/WrappedPage').then(m => ({ default: m.WrappedPage })));
 const SpendingDashboardPage = lazy(() => import('./pages/SpendingDashboardPage').then(m => ({ default: m.SpendingDashboardPage })));
+const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const TopUpPage = lazy(() => import('./pages/TopUpPage').then(m => ({ default: m.TopUpPage })));
 
 import './utils/autoReminderScheduler';
 
 const routes: { path: string; Page: ComponentType }[] = [
   { path: '/', Page: HomePage },
+  { path: '/top-up', Page: TopUpPage },
   { path: '/scan', Page: QRScanPage },
   { path: '/split-setup', Page: SplitSetupPage },
   { path: '/select-contacts', Page: ContactSelectionPage },
@@ -66,6 +69,18 @@ function PageLoading() {
 }
 
 const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: (
+      <MobileFrame requiresAuth={false}>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoading />}>
+            <LoginPage />
+          </Suspense>
+        </ErrorBoundary>
+      </MobileFrame>
+    ),
+  },
   ...routes.map(({ path, Page }) => ({
     path,
     element: (

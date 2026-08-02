@@ -105,7 +105,7 @@ export function seedTransactions(): void {
     { name: 'Top-up via PayNow', cat: 'topup', amt: 50.0 },
     { name: 'BreadTalk Bugis', cat: 'payment', amt: -4.8 },
     { name: 'Kopitiam Food Court', cat: 'payment', amt: -7.3 },
-    { name: 'Auto Top-up', cat: 'topup', amt: 30.0 },
+    { name: 'Top-up via DBS/POSB', cat: 'topup', amt: 30.0 },
     { name: 'Din Tai Fung', cat: 'payment', amt: -28.6 },
     { name: 'Guardian Pharmacy', cat: 'payment', amt: -15.9 },
     { name: 'Top-up via Card', cat: 'topup', amt: 100.0 },

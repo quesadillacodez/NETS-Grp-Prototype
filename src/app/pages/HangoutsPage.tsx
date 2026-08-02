@@ -10,16 +10,19 @@ import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import {
-  ACTIVITIES,
   confirmHangout,
   createHangout,
+  getActivities,
   getActivity,
   getHangoutsForUser,
   getHangoutVotes,
   getLeadingActivityId,
   getLeadingActivityIds,
+  getParticipantIds,
   getSavedActivityIds,
+  hasEveryoneVoted,
   toggleSavedActivity,
+  validateBudget,
   voteForActivity,
   type Activity,
   type ActivityCategory,
@@ -71,7 +74,7 @@ function ActivityCard({ activity, saved, onSave, onOpen }: {
             </p>
           </button>
           <button
-            aria-label={saved ? 'Remove from shortlist' : 'Add to shortlist'}
+            aria-label={saved ? 'Remove from favourites' : 'Add to favourites'}
             onClick={() => onSave(activity.id)}
             className={`grid h-8 w-8 place-items-center rounded-xl ${saved ? 'bg-red-50 text-red-500' : 'bg-secondary text-muted-foreground'}`}
           >
@@ -130,11 +133,11 @@ function ActivityDetail({ activity, saved, onSave, onPlan, onClose }: {
         <p className="text-sm leading-relaxed text-muted-foreground">{activity.description}</p>
         <div className="rounded-2xl border border-primary/15 bg-primary/5 p-3">
           <p className="text-xs font-black text-primary">Designed for group decisions</p>
-          <p className="mt-1 text-xs text-muted-foreground">Shortlist this idea, invite friends, and let everyone vote before anyone pays.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Favourite this idea, invite friends, and let everyone vote before anyone pays.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={onSave} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border py-3 text-sm font-black">
-            <Heart size={17} fill={saved ? 'currentColor' : 'none'} className={saved ? 'text-red-500' : ''} /> {saved ? 'Shortlisted' : 'Shortlist'}
+            <Heart size={17} fill={saved ? 'currentColor' : 'none'} className={saved ? 'text-red-500' : ''} /> {saved ? 'Favourited' : 'Favourite'}
           </button>
           <button onClick={onPlan} className="flex flex-[1.3] items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-black text-white">
             Start a Hangout <ArrowRight size={17} />
@@ -145,8 +148,9 @@ function ActivityDetail({ activity, saved, onSave, onPlan, onClose }: {
   );
 }
 
-function CreateHangoutSheet({ initialIds, ownerId, onCreated, onClose }: {
+function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClose }: {
   initialIds: number[];
+  activities: Activity[];
   ownerId: string;
   onCreated: (id: number) => void;
   onClose: () => void;
@@ -157,18 +161,22 @@ function CreateHangoutSheet({ initialIds, ownerId, onCreated, onClose }: {
   const [budget, setBudget] = useState('40');
   const [activityIds, setActivityIds] = useState<number[]>(() => {
     const unique = [...new Set(initialIds)];
-    return (unique.length ? unique : ACTIVITIES.slice(0, 3).map(a => a.id)).slice(0, 3);
+    return unique.length ? unique : activities.slice(0, 3).map(a => a.id);
   });
   const [inviteIds, setInviteIds] = useState<string[]>(() => contacts.slice(0, 2).map(user => user.id));
 
   const toggleActivity = (id: number) => {
-    setActivityIds(current => current.includes(id) ? current.filter(item => item !== id) : current.length < 3 ? [...current, id] : current);
+    setActivityIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   };
   const toggleInvite = (id: string) => {
     setInviteIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   };
-  const canCreate = name.trim().length > 1 && activityIds.length >= 2
-    && inviteIds.length > 0 && date >= tomorrow() && Number(budget) > 0;
+
+  const selectedActivities = activities.filter(activity => activityIds.includes(activity.id));
+  const budgetError = validateBudget(budget, selectedActivities);
+  const dateError = date < tomorrow() ? 'Pick a date at least a week out so everyone can plan.' : null;
+  const canCreate = name.trim().length > 1 && activityIds.length >= 1
+    && inviteIds.length > 0 && !dateError && !budgetError;
 
   return (
     <Sheet onClose={onClose}>
@@ -181,20 +189,32 @@ function CreateHangoutSheet({ initialIds, ownerId, onCreated, onClose }: {
         <label className="mb-1 block text-xs font-black">Plan name</label>
         <input value={name} onChange={event => setName(event.target.value)} className="mb-4 w-full rounded-xl border border-border px-3 py-2.5 text-sm outline-none focus:border-primary" />
 
-        <div className="mb-4 grid grid-cols-2 gap-3">
+        <div className="mb-2 grid grid-cols-2 gap-3">
           <label className="text-xs font-black">Date<input type="date" min={tomorrow()} value={date} onChange={event => setDate(event.target.value)} className="mt-1 w-full rounded-xl border border-border px-3 py-2.5 text-xs font-normal" /></label>
-          <label className="text-xs font-black">Budget per person<input type="number" min="1" value={budget} onChange={event => setBudget(event.target.value)} className="mt-1 w-full rounded-xl border border-border px-3 py-2.5 text-xs font-normal" /></label>
+          <label className="text-xs font-black">Budget per person<input type="number" min="1" value={budget} onChange={event => setBudget(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2.5 text-xs font-normal ${budgetError ? 'border-destructive' : 'border-border'}`} /></label>
         </div>
+        {(dateError || budgetError) && (
+          <p className="mb-4 rounded-xl bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700">{dateError ?? budgetError}</p>
+        )}
+        {!dateError && !budgetError && <div className="mb-4" />}
 
         <div className="mb-4">
-          <div className="mb-2 flex items-center justify-between"><p className="text-xs font-black">Choose 2-3 ideas</p><span className="text-[10px] font-bold text-muted-foreground">{activityIds.length}/3</span></div>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-black">Choose the ideas to vote on</p>
+            <span className="text-[10px] font-bold text-muted-foreground">{activityIds.length} selected</span>
+          </div>
           <div className="space-y-2">
-            {ACTIVITIES.filter(activity => activity.pricePerPerson <= Number(budget || 0) || activityIds.includes(activity.id)).map(activity => {
+            {activities.map(activity => {
               const selected = activityIds.includes(activity.id);
+              const overBudget = activity.pricePerPerson > Number(budget || 0);
               return (
                 <button key={activity.id} onClick={() => toggleActivity(activity.id)} className={`flex w-full items-center gap-3 rounded-xl border p-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border'}`}>
                   <ImageWithFallback src={activity.image} alt={activity.title} className="h-11 w-11 rounded-lg object-cover" />
-                  <div className="min-w-0 flex-1"><p className="truncate text-xs font-black">{activity.title}</p><p className="text-[10px] text-muted-foreground">${activity.pricePerPerson}/person - {activity.location}</p></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-black">{activity.title}</p>
+                    <p className="text-[10px] text-muted-foreground">${activity.pricePerPerson}/person - {activity.location}</p>
+                    {overBudget && <p className="mt-0.5 text-[10px] font-bold text-amber-700">Over your ${Number(budget || 0)} budget</p>}
+                  </div>
                   <div className={`grid h-6 w-6 place-items-center rounded-full ${selected ? 'bg-primary text-white' : 'bg-secondary text-transparent'}`}><Check size={13} /></div>
                 </button>
               );
@@ -237,9 +257,12 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
   const leaderIds = getLeadingActivityIds(plan, votes);
   const confirmed = plan.confirmedActivityId ? getActivity(plan.confirmedActivityId) : null;
   const owner = plan.ownerUserId === currentUserId;
+  const participantIds = getParticipantIds(plan);
+  const everyoneVoted = hasEveryoneVoted(plan, votes);
+  const pendingVoters = participantIds.length - votes.length;
   const tieNeedsOwnerChoice = leaderIds.length > 1 && (!currentVote || !leaderIds.includes(currentVote));
   const finalActivityId = leaderIds.length > 1 && currentVote && leaderIds.includes(currentVote) ? currentVote : leaderId;
-  const canFinalize = votes.length > 0 && !tieNeedsOwnerChoice;
+  const canFinalize = everyoneVoted && !tieNeedsOwnerChoice;
   const users = getAllUsers();
 
   const selectVote = (activityId: number) => {
@@ -291,20 +314,24 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
               })}
             </div>
             <div className="mt-4 rounded-2xl bg-secondary p-3">
-              <p className="text-[10px] font-bold text-muted-foreground">Responses</p>
+              <p className="text-[10px] font-bold text-muted-foreground">Responses · {votes.length}/{participantIds.length} voted</p>
               <div className="mt-2 flex -space-x-1">
-                {[plan.ownerUserId, ...plan.invitedUserIds].map(id => {
+                {participantIds.map(id => {
                   const user = users.find(item => item.id === id);
                   const hasVoted = votes.some(vote => vote.userId === id);
                   return <div key={id} title={`${user?.name ?? 'Friend'}${hasVoted ? ' voted' : ' pending'}`} className={`grid h-8 w-8 place-items-center rounded-full border-2 border-white text-sm ${hasVoted ? 'bg-primary/15' : 'bg-gray-100 grayscale'}`}>{user?.avatar ?? '?'}</div>;
                 })}
               </div>
             </div>
+            {!everyoneVoted && (
+              <p className="mt-3 text-center text-[11px] font-bold text-muted-foreground">
+                Waiting on {pendingVoters} {pendingVoters === 1 ? 'person' : 'people'} — the plan locks in once everyone has voted.
+              </p>
+            )}
             {owner && (
               <>
-                {tieNeedsOwnerChoice && <p className="mt-3 text-center text-[11px] font-bold text-amber-700">Tie: vote for one of the leading choices to break it.</p>}
-                {votes.length === 0 && <p className="mt-3 text-center text-[11px] font-bold text-muted-foreground">At least one vote is required before confirmation.</p>}
-                <button disabled={!canFinalize} onClick={finalize} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white disabled:opacity-40"><Check size={17} /> Confirm current top choice</button>
+                {everyoneVoted && tieNeedsOwnerChoice && <p className="mt-3 text-center text-[11px] font-bold text-amber-700">Tie: vote for one of the leading choices to break it.</p>}
+                <button disabled={!canFinalize} onClick={finalize} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white disabled:opacity-40"><Check size={17} /> Confirm group choice</button>
               </>
             )}
           </div>
@@ -317,9 +344,10 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
 export function HangoutsPage() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
+  const [activities, setActivities] = useState(() => getActivities());
   const [savedIds, setSavedIds] = useState(() => getSavedActivityIds(currentUser.id));
   const [plans, setPlans] = useState(() => getHangoutsForUser(currentUser.id));
-  const [tab, setTab] = useState<'discover' | 'plans'>('discover');
+  const [tab, setTab] = useState<'discover' | 'favourites' | 'plans'>('discover');
   const [category, setCategory] = useState<ActivityCategory | 'all'>('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Activity | null>(null);
@@ -331,18 +359,23 @@ export function HangoutsPage() {
   const refresh = () => {
     const user = getCurrentUser();
     setCurrentUser(user);
+    setActivities(getActivities());
     setSavedIds(getSavedActivityIds(user.id));
     setPlans(getHangoutsForUser(user.id));
   };
-  useAppEvents(['userSwitched', 'savedActivitiesUpdated', 'hangoutsUpdated', 'databaseReady', 'focus'], refresh);
+  useAppEvents(['userSwitched', 'savedActivitiesUpdated', 'hangoutsUpdated', 'activitiesUpdated', 'databaseReady', 'focus'], refresh);
 
   const visibleActivities = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return ACTIVITIES.filter(activity =>
+    return activities.filter(activity =>
       (category === 'all' || activity.category === category) &&
       (!term || [activity.title, activity.venue, activity.location].some(value => value.toLowerCase().includes(term))),
     );
-  }, [category, search]);
+  }, [activities, category, search]);
+  const favourites = useMemo(
+    () => activities.filter(activity => savedIds.includes(activity.id)),
+    [activities, savedIds],
+  );
   const selectedPlan = selectedPlanId ? plans.find(plan => plan.id === selectedPlanId) ?? null : null;
 
   const save = (id: number) => toggleSavedActivity(currentUser.id, id);
@@ -355,9 +388,10 @@ export function HangoutsPage() {
           <div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">Plan the experience before anyone pays.</p></div>
           <button onClick={() => setShowAccountSwitcher(true)} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button>
         </div>
-        <div className="mt-4 grid grid-cols-2 rounded-xl bg-secondary p-1">
+        <div className="mt-4 grid grid-cols-3 rounded-xl bg-secondary p-1">
           <button onClick={() => setTab('discover')} className={`rounded-lg py-2 text-xs font-black ${tab === 'discover' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Discover</button>
-          <button onClick={() => setTab('plans')} className={`rounded-lg py-2 text-xs font-black ${tab === 'plans' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>My Hangouts {plans.length ? `(${plans.length})` : ''}</button>
+          <button onClick={() => setTab('favourites')} className={`rounded-lg py-2 text-xs font-black ${tab === 'favourites' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Favourites {savedIds.length ? `(${savedIds.length})` : ''}</button>
+          <button onClick={() => setTab('plans')} className={`rounded-lg py-2 text-xs font-black ${tab === 'plans' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Hangouts {plans.length ? `(${plans.length})` : ''}</button>
         </div>
       </header>
 
@@ -370,11 +404,34 @@ export function HangoutsPage() {
             </div>
           </div>
           <main className="flex-1 overflow-y-auto px-4 py-3 pb-28">
-            <div className="mb-3 flex items-end justify-between"><div><p className="text-[10px] font-black uppercase tracking-wider text-primary">Suvanesh's feature</p><h1 className="text-lg font-black">Ideas your group can agree on</h1></div><button onClick={() => startPlan(savedIds)} className="rounded-xl bg-primary px-3 py-2 text-xs font-black text-white">Plan together</button></div>
-            {savedIds.length > 0 && <div className="mb-3 flex items-center gap-2 rounded-xl bg-primary/5 p-2.5 text-xs text-primary"><Heart size={14} fill="currentColor" /><strong>{savedIds.length} shortlisted</strong><span className="text-primary/70">- ready for group voting</span></div>}
+            <div className="mb-3 flex items-end justify-between"><div><p className="text-[10px] font-black uppercase tracking-wider text-primary">NETS Hangouts</p><h1 className="text-lg font-black">Ideas your group can agree on</h1></div><button onClick={() => startPlan(savedIds)} className="rounded-xl bg-primary px-3 py-2 text-xs font-black text-white">Plan together</button></div>
+            {savedIds.length > 0 && (
+              <button onClick={() => setTab('favourites')} className="mb-3 flex w-full items-center gap-2 rounded-xl bg-primary/5 p-2.5 text-xs text-primary">
+                <Heart size={14} fill="currentColor" /><strong>{savedIds.length} favourited</strong><span className="text-primary/70">- view your list</span>
+              </button>
+            )}
             <div className="grid grid-cols-2 gap-3">{visibleActivities.map(activity => <ActivityCard key={activity.id} activity={activity} saved={savedIds.includes(activity.id)} onSave={save} onOpen={setSelected} />)}</div>
           </main>
         </>
+      ) : tab === 'favourites' ? (
+        <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
+          <div className="mb-4 flex items-center justify-between">
+            <div><p className="text-xs text-muted-foreground">Saved for later</p><h1 className="text-xl font-black">Your favourites</h1></div>
+            {favourites.length > 0 && <button onClick={() => startPlan(savedIds)} className="rounded-xl bg-primary px-3 py-2 text-xs font-black text-white">Plan these</button>}
+          </div>
+          {favourites.length === 0 ? (
+            <div className="mt-14 text-center">
+              <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-red-50 text-red-500"><Heart size={28} /></div>
+              <h2 className="mt-3 text-base font-black">No favourites yet</h2>
+              <p className="mx-auto mt-1 max-w-[260px] text-xs text-muted-foreground">Tap the heart on any activity and it will show up here, ready to turn into a group plan.</p>
+              <button onClick={() => setTab('discover')} className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-xs font-black text-white">Discover activities</button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {favourites.map(activity => <ActivityCard key={activity.id} activity={activity} saved onSave={save} onOpen={setSelected} />)}
+            </div>
+          )}
+        </main>
       ) : (
         <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
           <div className="mb-4 flex items-center justify-between"><div><p className="text-xs text-muted-foreground">Shared decisions, one plan</p><h1 className="text-xl font-black">Your group plans</h1></div><button onClick={() => startPlan(savedIds)} className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-white"><Users size={18} /></button></div>
@@ -393,7 +450,7 @@ export function HangoutsPage() {
       <BottomNav />
       <AccountSwitcher isOpen={showAccountSwitcher} onClose={() => setShowAccountSwitcher(false)} />
       <AnimatePresence>{selected && <ActivityDetail activity={selected} saved={savedIds.includes(selected.id)} onSave={() => save(selected.id)} onPlan={() => startPlan([selected.id, ...savedIds])} onClose={() => setSelected(null)} />}</AnimatePresence>
-      <AnimatePresence>{showCreate && <CreateHangoutSheet initialIds={createSeed} ownerId={currentUser.id} onClose={() => setShowCreate(false)} onCreated={id => { setShowCreate(false); refresh(); setTab('plans'); setSelectedPlanId(id); }} />}</AnimatePresence>
+      <AnimatePresence>{showCreate && <CreateHangoutSheet initialIds={createSeed} activities={activities} ownerId={currentUser.id} onClose={() => setShowCreate(false)} onCreated={id => { setShowCreate(false); refresh(); setTab('plans'); setSelectedPlanId(id); }} />}</AnimatePresence>
       <AnimatePresence>{selectedPlan && <PlanDetail plan={selectedPlan} currentUserId={currentUser.id} onClose={() => setSelectedPlanId(null)} onRefresh={refresh} onPay={(plan, activity) => navigate('/scan', { state: {
         paymentId: createPaymentId(),
         hangoutId: plan.id,
@@ -401,6 +458,7 @@ export function HangoutsPage() {
         amount: activity.pricePerPerson * (plan.invitedUserIds.length + 1),
         merchantName: activity.venue,
         reference: `${plan.name} - ${activity.title}`,
+        spendCategory: 'Entertainment',
       } })} />}</AnimatePresence>
     </div>
   );

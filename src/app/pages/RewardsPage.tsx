@@ -204,7 +204,7 @@ export function RewardsPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       <header className="border-b border-border bg-white px-4 pb-3 pt-8">
-        <div className="flex items-center justify-between"><div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">Hadi's XP loyalty experience</p></div><button onClick={() => setShowAccountSwitcher(true)} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button></div>
+        <div className="flex items-center justify-between"><div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">NETS Rewards · earn and spend XP</p></div><button onClick={() => setShowAccountSwitcher(true)} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button></div>
         <div className="mt-4 flex gap-1 overflow-x-auto rounded-xl bg-secondary p-1">
           {([
             { key: 'overview', label: 'XP Home', icon: Award },

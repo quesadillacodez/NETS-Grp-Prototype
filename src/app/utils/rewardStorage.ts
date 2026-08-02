@@ -1,5 +1,6 @@
 import { lastInsertId, query, run } from './db';
 import { getDeals } from './dealStorage';
+import { DEFAULT_XP_RATE, getMerchantByName } from './merchantStorage';
 
 export type RewardCategory = 'Cashback' | 'Vouchers' | 'Partner Deals';
 
@@ -79,9 +80,20 @@ function isHeartlandMerchant(name: string): boolean {
   return HEARTLAND_KEYWORDS.some(keyword => normalized.includes(keyword));
 }
 
+// Merchants configured in the management portal carry their own XP rate and
+// bonus multiplier; anything else falls back to the standard rate plus the
+// automatic heartland bonus.
 export function calculateTransactionXP(name: string, amount: number): { xp: number; bonus?: string } {
   if (amount >= 0) return { xp: 0 };
-  const base = Math.max(1, Math.round(Math.abs(amount) * 10));
+  const spend = Math.abs(amount);
+  const merchant = getMerchantByName(name);
+
+  if (merchant) {
+    const xp = Math.max(1, Math.round(spend * merchant.xpRate * merchant.xpBonus));
+    return merchant.xpBonus > 1 ? { xp, bonus: `${merchant.xpBonus}x merchant bonus` } : { xp };
+  }
+
+  const base = Math.max(1, Math.round(spend * DEFAULT_XP_RATE));
   if (isHeartlandMerchant(name)) return { xp: base * 2, bonus: 'Heartland 2x' };
   return { xp: base };
 }

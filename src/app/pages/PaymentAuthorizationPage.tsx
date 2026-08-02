@@ -7,6 +7,7 @@ import { addTransaction, formatDateForTransaction } from '../utils/transactionSt
 import { getCurrentUser } from '../utils/userStorage';
 import { deleteNotificationByReminder } from '../utils/notificationStorage';
 import { createSimulatedAuthorization } from '../utils/securePayment';
+import { categorizeMerchant } from '../utils/spendingInsights';
 
 type AuthStatus = 'pending' | 'authorizing' | 'approved';
 
@@ -36,7 +37,11 @@ export function PaymentAuthorizationPage() {
         const paid = markReminderAsPaid(reminder.id);
         if (paid) {
           deleteNotificationByReminder(reminder.id);
-          addTransaction({ name: paid.fromUserName, amount: -paid.amount, date: formatDateForTransaction(), category: paid.category, status: 'sent', kind: 'transfer' }, currentUser.id);
+          // Settling a split bill is a real expense for the person paying it
+          // back, so it carries the original bill's spending category and shows
+          // up in their dashboard and budgets. It stays a transfer rather than a
+          // purchase because the payer already earned the XP at the merchant.
+          addTransaction({ name: `${paid.category} (split with ${paid.fromUserName})`, amount: -paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'sent', kind: 'transfer' }, currentUser.id);
           addTransaction({ name: currentUser.name, amount: paid.amount, date: formatDateForTransaction(), category: paid.category, status: 'received', kind: 'transfer' }, paid.fromUserId);
         }
       }

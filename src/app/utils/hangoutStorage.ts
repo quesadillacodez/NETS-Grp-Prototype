@@ -36,9 +36,10 @@ export interface HangoutVote {
   activityId: number;
 }
 
-// Suvanesh's catalogue is intentionally about planning an outing. Prices help a
-// group agree on a budget; there are no discounts, XP, vouchers, or redemptions.
-export const ACTIVITIES: Activity[] = [
+// The Hangouts catalogue is about planning an outing. Prices help a group agree
+// on a budget; there are no discounts, XP, vouchers, or redemptions. These rows
+// seed the `activities` table, which management can then edit from the portal.
+const DEFAULT_ACTIVITIES: Activity[] = [
   {
     id: 1,
     category: 'creative',
@@ -146,6 +147,82 @@ export const ACTIVITIES: Activity[] = [
   },
 ];
 
+const ACTIVITY_CATEGORIES: ActivityCategory[] = ['food', 'attraction', 'creative', 'active'];
+
+function rowToActivity(row: Record<string, any>): Activity {
+  const category = String(row.category) as ActivityCategory;
+  return {
+    id: Number(row.id),
+    category: ACTIVITY_CATEGORIES.includes(category) ? category : 'food',
+    title: String(row.title),
+    venue: String(row.venue),
+    location: String(row.location),
+    pricePerPerson: Number(row.price_per_person),
+    duration: String(row.duration),
+    groupSize: String(row.group_size),
+    rating: Number(row.rating),
+    image: String(row.image),
+    description: String(row.description),
+  };
+}
+
+function notifyActivities(): void {
+  window.dispatchEvent(new CustomEvent('activitiesUpdated'));
+}
+
+export function seedActivitiesIfEmpty(): void {
+  const row = queryOne('SELECT COUNT(*) AS n FROM activities');
+  if (row && Number(row.n) > 0) return;
+  for (const activity of DEFAULT_ACTIVITIES) {
+    run(
+      `INSERT INTO activities
+        (id, category, title, venue, location, price_per_person, duration, group_size, rating, image, description, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [activity.id, activity.category, activity.title, activity.venue, activity.location,
+        activity.pricePerPerson, activity.duration, activity.groupSize, activity.rating,
+        activity.image, activity.description],
+    );
+  }
+}
+
+export function getActivities(): Activity[] {
+  seedActivitiesIfEmpty();
+  return query('SELECT * FROM activities WHERE active = 1 ORDER BY id').map(rowToActivity);
+}
+
+export function addActivity(activity: Omit<Activity, 'id'>): number {
+  run(
+    `INSERT INTO activities
+      (category, title, venue, location, price_per_person, duration, group_size, rating, image, description, active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    [activity.category, activity.title, activity.venue, activity.location, activity.pricePerPerson,
+      activity.duration, activity.groupSize, activity.rating, activity.image, activity.description],
+  );
+  const id = lastInsertId();
+  notifyActivities();
+  return id;
+}
+
+export function updateActivity(activity: Activity): void {
+  run(
+    `UPDATE activities SET
+       category = ?, title = ?, venue = ?, location = ?, price_per_person = ?,
+       duration = ?, group_size = ?, rating = ?, image = ?, description = ?
+     WHERE id = ?`,
+    [activity.category, activity.title, activity.venue, activity.location, activity.pricePerPerson,
+      activity.duration, activity.groupSize, activity.rating, activity.image, activity.description,
+      activity.id],
+  );
+  notifyActivities();
+}
+
+// Soft delete: hangouts already created may still reference this activity, so the
+// row stays readable by getActivity() while disappearing from the catalogue.
+export function deleteActivity(activityId: number): void {
+  run('UPDATE activities SET active = 0 WHERE id = ?', [activityId]);
+  notifyActivities();
+}
+
 function parseIds(value: unknown): number[] {
   try {
     const parsed = JSON.parse(String(value ?? '[]'));
@@ -188,7 +265,9 @@ function notifySaved(): void {
 }
 
 export function getActivity(activityId: number): Activity | null {
-  return ACTIVITIES.find(activity => activity.id === activityId) ?? null;
+  seedActivitiesIfEmpty();
+  const row = queryOne('SELECT * FROM activities WHERE id = ?', [activityId]);
+  return row ? rowToActivity(row) : null;
 }
 
 export function getSavedActivityIds(userId: string): number[] {
@@ -207,6 +286,25 @@ export function toggleSavedActivity(userId: string, activityId: number): void {
     run('INSERT INTO saved_activities (user_id, activity_id) VALUES (?, ?)', [userId, activityId]);
   }
   notifySaved();
+}
+
+export const MIN_BUDGET_PER_PERSON = 5;
+export const MAX_BUDGET_PER_PERSON = 500;
+
+// Returns a human-readable problem with the chosen budget, or null when it's fine.
+export function validateBudget(rawBudget: string, selected: Activity[]): string | null {
+  const budget = Number(rawBudget);
+  if (!rawBudget.trim() || !Number.isFinite(budget)) return 'Enter a budget per person.';
+  if (budget <= 0) return 'Budget must be greater than $0.';
+  if (budget < MIN_BUDGET_PER_PERSON) return `Budget must be at least $${MIN_BUDGET_PER_PERSON} per person.`;
+  if (budget > MAX_BUDGET_PER_PERSON) return `Budget cannot exceed $${MAX_BUDGET_PER_PERSON} per person.`;
+
+  const overBudget = selected.filter(activity => activity.pricePerPerson > budget);
+  if (overBudget.length > 0) {
+    const cheapest = Math.min(...overBudget.map(activity => activity.pricePerPerson));
+    return `${overBudget.length} selected idea${overBudget.length === 1 ? '' : 's'} cost more than $${budget}/person. Raise the budget to at least $${cheapest} or remove them.`;
+  }
+  return null;
 }
 
 export function createHangout(input: {
@@ -242,6 +340,10 @@ export function getHangout(hangoutId: number): Hangout | null {
   return row ? rowToHangout(row) : null;
 }
 
+export function getAllHangouts(): Hangout[] {
+  return query('SELECT * FROM hangouts ORDER BY created_at DESC').map(rowToHangout);
+}
+
 export function getHangoutsForUser(userId: string): Hangout[] {
   return query('SELECT * FROM hangouts ORDER BY created_at DESC')
     .map(rowToHangout)
@@ -269,12 +371,24 @@ export function voteForActivity(hangoutId: number, userId: string, activityId: n
   notifyHangouts();
 }
 
+export function getParticipantIds(hangout: Hangout): string[] {
+  return [hangout.ownerUserId, ...hangout.invitedUserIds];
+}
+
+// Everyone invited must have voted before a plan can be locked in, so nobody
+// loses their say to whoever votes first.
+export function hasEveryoneVoted(hangout: Hangout, votes = getHangoutVotes(hangout.id)): boolean {
+  const voted = new Set(votes.map(vote => vote.userId));
+  return getParticipantIds(hangout).every(id => voted.has(id));
+}
+
 export function confirmHangout(hangoutId: number, ownerUserId: string, activityId: number): void {
   const hangout = getHangout(hangoutId);
   if (!hangout) return;
-  const leaders = getLeadingActivityIds(hangout, getHangoutVotes(hangoutId));
+  const votes = getHangoutVotes(hangoutId);
+  const leaders = getLeadingActivityIds(hangout, votes);
   if (hangout.status !== 'voting' || hangout.ownerUserId !== ownerUserId
-      || !leaders.includes(activityId)) return;
+      || !hasEveryoneVoted(hangout, votes) || !leaders.includes(activityId)) return;
   run(
     "UPDATE hangouts SET status = 'confirmed', confirmed_activity_id = ? WHERE id = ?",
     [activityId, hangoutId],

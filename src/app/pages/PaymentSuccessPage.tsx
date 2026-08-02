@@ -8,7 +8,7 @@ import { addReminders, getAllReminders } from '../utils/reminderStorage';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { addNotification } from '../utils/notificationStorage';
 import { useRequiredState } from '../utils/useRequiredState';
-import type { PaymentFlowContext, SplitParticipant } from '../utils/paymentFlow';
+import { resolvePaymentCategory, type PaymentFlowContext, type SplitParticipant } from '../utils/paymentFlow';
 
 interface PaymentSuccessState extends Record<string, unknown>, PaymentFlowContext {
   participants: SplitParticipant[];
@@ -40,7 +40,7 @@ export function PaymentSuccessPage() {
       name: merchantName,
       amount: -amount,
       date: formatDateForTransaction(),
-      category: 'Food & Beverage',
+      category: resolvePaymentCategory(merchantName, state ?? undefined),
       kind: 'purchase',
       paymentId,
     }, currentUser.id);

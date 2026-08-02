@@ -1,8 +1,20 @@
+import { categorizeMerchant, type SpendCategory } from './spendingInsights';
+
 export interface PaymentFlowContext {
   paymentId: string;
   hangoutId?: number;
   participantUserIds?: string[];
   reference?: string;
+  /** Set when the origin of the payment already knows the category, e.g. a Hangout outing. */
+  spendCategory?: SpendCategory;
+}
+
+// The category written onto the transaction so Hangout outings, split bills and
+// plain QR payments all land in the right bucket on the spending dashboard.
+export function resolvePaymentCategory(merchantName: string, context?: Pick<PaymentFlowContext, 'hangoutId' | 'spendCategory'>): SpendCategory {
+  if (context?.spendCategory) return context.spendCategory;
+  if (context?.hangoutId) return 'Entertainment';
+  return categorizeMerchant(merchantName);
 }
 
 export interface SplitParticipant {

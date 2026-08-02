@@ -16,8 +16,9 @@ import { useAppEvents } from "../utils/useAppEvents";
 import {
   Sparkles, TrendingUp, TrendingDown, ShoppingBag, Award, Calendar,
   ChevronLeft, ChevronRight, DollarSign, UserX, Clock, Bell, Eye, EyeOff,
-  Share2, Users, Play, Pause,
+  Share2, Users, Play, Pause, X, Home,
 } from "lucide-react";
+import { useNavigate } from "react-router";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { toPng } from "html-to-image";
@@ -197,6 +198,7 @@ function WrappedSlide({
   const anim = animationType === "scale"
     ? { initial: { opacity: 0, scale: 0.8 }, animate: { opacity: 1, scale: 1 }, exit: { opacity: 0, scale: 0.8 } }
     : { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
+  const isHidden = !!statKey && !enabledStats[statKey];
 
   return (
     <motion.div ref={slideRef} {...anim}
@@ -214,6 +216,7 @@ function WrappedSlide({
 
       {statKey && (
         <button onClick={(e) => { e.stopPropagation(); toggleStat(statKey); }}
+          aria-label={enabledStats[statKey] ? 'Hide this stat' : 'Show this stat'}
           className="absolute top-4 right-4 z-10 size-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors">
           {enabledStats[statKey] ? <Eye className="size-5" /> : <EyeOff className="size-5" />}
         </button>
@@ -230,12 +233,23 @@ function WrappedSlide({
         )}
       </AnimatePresence>
 
-      <div className="relative z-[1]">{children}</div>
+      <div className="relative z-[1]">
+        <div className={isHidden ? 'blur-md select-none opacity-50 transition-all' : 'transition-all'}>{children}</div>
+        {isHidden && (
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <EyeOff className="size-8" />
+            <p className="text-sm font-semibold">Hidden</p>
+            <p className="max-w-[200px] text-xs text-white/80">Tap the eye to reveal this stat and put it back in your summary.</p>
+          </motion.div>
+        )}
+      </div>
     </motion.div>
   );
 }
 
 export function WrappedPage() {
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [currentSlide, setCurrentSlide] = useState(0);
   const [hasStarted, setHasStarted] = useState(false);
@@ -435,7 +449,13 @@ export function WrappedPage() {
 
   return (
     <div className="flex flex-col bg-gradient-to-br from-white via-primary/5 to-secondary h-full">
-      <StoryProgress total={slides.length} current={currentSlide} isPlaying={isPlaying} />
+      <div className="flex items-center gap-2 px-2 pt-2 shrink-0">
+        <div className="flex-1"><StoryProgress total={slides.length} current={currentSlide} isPlaying={isPlaying} /></div>
+        <button onClick={() => navigate("/")} aria-label="Exit Wrapped"
+          className="mr-2 flex items-center gap-1 rounded-full bg-black/5 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-black/10 transition-colors">
+          <X className="size-3.5" /> Exit
+        </button>
+      </div>
       <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto"
         onClick={handleSlideAreaClickWithSwipeGuard} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         <AnimatePresence mode="wait">
@@ -620,6 +640,9 @@ export function WrappedPage() {
                     <Button onClick={restart} variant="outline" className="flex-1">View Again</Button>
                     <Button onClick={() => { setHasStarted(false); setCurrentSlide(0); }} variant="outline" className="flex-1">Change Month</Button>
                   </div>
+                  <Button onClick={() => navigate("/")} variant="ghost" className="w-full text-muted-foreground">
+                    <Home className="size-4 mr-2" /> Exit to Home
+                  </Button>
                 </div>
               </Card>
             </motion.div>

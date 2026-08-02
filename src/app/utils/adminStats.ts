@@ -12,6 +12,8 @@ export interface AdminStats {
   totalTransactions: number; // all-time
   transactionsToday: number;
   dealsRedeemed: number;
+  hangoutsPlanned: number;   // group plans created by users
+  hangoutsConfirmed: number; // plans where voting has closed
   walletVolume: number;      // total absolute SGD moved
   last7Days: DayBucket[];
   weekOverWeekTxnChange: number | null; // % change vs previous 7 days, null if no baseline
@@ -38,6 +40,8 @@ export function getAdminStats(): AdminStats {
   const totalUsers = num('SELECT COUNT(*) FROM users WHERE COALESCE(is_admin,0) = 0');
   const totalTransactions = num('SELECT COUNT(*) FROM transactions');
   const dealsRedeemed = num('SELECT COUNT(*) FROM reward_redemptions');
+  const hangoutsPlanned = num('SELECT COUNT(*) FROM hangouts');
+  const hangoutsConfirmed = num("SELECT COUNT(*) FROM hangouts WHERE status = 'confirmed'");
   const walletVolume = num('SELECT COALESCE(SUM(ABS(amount)), 0) FROM transactions');
 
   const todayStart = startOfDay(Date.now());
@@ -86,6 +90,8 @@ export function getAdminStats(): AdminStats {
     totalTransactions,
     transactionsToday,
     dealsRedeemed,
+    hangoutsPlanned,
+    hangoutsConfirmed,
     walletVolume,
     last7Days,
     weekOverWeekTxnChange,

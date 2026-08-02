@@ -13,7 +13,7 @@ import {
 } from '../utils/netsQr';
 import { getMerchants, type Merchant } from '../utils/merchantStorage';
 import { useAppEvents } from '../utils/useAppEvents';
-import { createPaymentId, type PaymentFlowContext } from '../utils/paymentFlow';
+import { createPaymentId, resolvePaymentCategory, type PaymentFlowContext } from '../utils/paymentFlow';
 
 interface ScanState extends Partial<PaymentFlowContext> {
   amount?: number;
@@ -320,6 +320,7 @@ export function QRScanPage() {
                         hangoutId: incoming?.hangoutId,
                         participantUserIds: incoming?.participantUserIds,
                         reference: incoming?.reference,
+                        spendCategory: incoming?.spendCategory,
                       },
                     })
                   }
@@ -334,7 +335,7 @@ export function QRScanPage() {
                         name: generatedMerchant,
                         amount: -generatedAmount,
                         date: formatDateForTransaction(),
-                        category: 'Food & Beverage',
+                        category: resolvePaymentCategory(generatedMerchant, incoming ?? undefined),
                         kind: 'purchase',
                         paymentId,
                       },

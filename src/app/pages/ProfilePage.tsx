@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, User, CreditCard, Bell, Lock, HelpCircle, Users, Trash2, Clock, Database, Store, Shield, Sparkles } from 'lucide-react';
+import { ChevronRight, User, CreditCard, Bell, Lock, HelpCircle, Users, Trash2, Clock, Database, Shield, Sparkles, LogOut } from 'lucide-react';
 import { NETSLogo } from '../components/NETSLogo';
 import { BottomNav } from '../components/BottomNav';
 import { AccountSwitcher } from '../components/AccountSwitcher';
@@ -8,6 +8,7 @@ import { markUserClearedFresh, flushSave, resetDatabase } from '../utils/db';
 import { seedTestReminders } from '../utils/seedTestData';
 import { useAppEvents } from '../utils/useAppEvents';
 import { useNavigate } from 'react-router';
+import { logout } from '../utils/authStorage';
 
 const MENU_ITEMS = [
   { icon: User,        label: 'Personal Information', color: 'from-blue-500 to-blue-600',   path: null },
@@ -171,6 +172,16 @@ export function ProfilePage() {
                 <Trash2 className="w-6 h-6 text-white" />
               </div>
               <span className="font-semibold text-destructive">Clear All Data</span>
+            </div>
+          </button>
+
+          <button onClick={() => { logout(); navigate('/login', { replace: true }); }}
+            className="w-full flex items-center justify-between p-4 bg-secondary rounded-2xl mt-2">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-muted-foreground flex items-center justify-center">
+                <LogOut className="w-6 h-6 text-white" />
+              </div>
+              <span className="font-semibold text-foreground">Sign Out</span>
             </div>
           </button>
         </div>

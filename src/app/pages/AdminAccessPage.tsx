@@ -4,19 +4,26 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import {
-  X, Shield, Users, TrendingUp, TrendingDown, ShoppingBag, DollarSign,
-  RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2,
+  X, Shield, Users, TrendingUp, TrendingDown, DollarSign, UsersRound,
+  RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap,
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
 import { getAllTransactions, type Transaction } from '../utils/transactionStorage';
-import { getDeals, addDeal, updateDeal, deleteDeal, type Deal } from '../utils/dealStorage';
 import { getRedemptions } from '../utils/redemptionStorage';
-import { getMerchants, saveMerchant, deactivateMerchant, type Merchant } from '../utils/merchantStorage';
+import {
+  getMerchants, saveMerchant, deactivateMerchant,
+  DEFAULT_XP_BONUS, DEFAULT_XP_RATE, type Merchant,
+} from '../utils/merchantStorage';
+import {
+  getActivities, addActivity, updateActivity, deleteActivity,
+  getAllHangouts, getActivity, getHangoutVotes, getParticipantIds,
+  type Activity, type ActivityCategory, type Hangout,
+} from '../utils/hangoutStorage';
 import { getAdminStats, getUserActivity, type AdminStats, type UserActivity } from '../utils/adminStats';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { useAppEvents } from '../utils/useAppEvents';
 
-type DealRecord = Deal;
+const ACTIVITY_CATEGORIES: ActivityCategory[] = ['food', 'attraction', 'creative', 'active'];
 
 function fmtMoney(n: number): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -39,38 +46,43 @@ function makeMerchantId(name: string): string {
   return `${base || 'merchant'}-${Date.now().toString(36)}`;
 }
 
-// ─── Add Deal Modal (light) ──────────────────────────────────────────────────
-function AddDealModal({ onClose, onSave, editDeal }: {
+// ─── Hangout activity editor ─────────────────────────────────────────────────
+function ActivityModal({ onClose, onSave, editActivity }: {
   onClose: () => void;
-  onSave: (d: Omit<DealRecord, 'id' | 'redeemedCount'>, editId?: number) => void;
-  editDeal?: DealRecord | null;
+  onSave: (activity: Omit<Activity, 'id'>, editId?: number) => void;
+  editActivity?: Activity | null;
 }) {
-  const [title, setTitle] = useState(editDeal?.title ?? '');
-  const [merchant, setMerchant] = useState(editDeal?.merchant ?? '');
-  const [location, setLocation] = useState(editDeal?.location ?? '');
-  const [category, setCategory] = useState<'food' | 'attractions'>(editDeal?.category ?? 'food');
-  const [originalPrice, setOriginalPrice] = useState(editDeal ? String(editDeal.originalPrice) : '');
-  const [discount, setDiscount] = useState(editDeal ? String(editDeal.discount) : '');
-  const [expiry, setExpiry] = useState(editDeal?.expiry ?? '');
-  const [image, setImage] = useState(editDeal?.image ?? '');
+  const [title, setTitle] = useState(editActivity?.title ?? '');
+  const [venue, setVenue] = useState(editActivity?.venue ?? '');
+  const [location, setLocation] = useState(editActivity?.location ?? '');
+  const [category, setCategory] = useState<ActivityCategory>(editActivity?.category ?? 'food');
+  const [price, setPrice] = useState(editActivity ? String(editActivity.pricePerPerson) : '');
+  const [duration, setDuration] = useState(editActivity?.duration ?? '');
+  const [groupSize, setGroupSize] = useState(editActivity?.groupSize ?? '');
+  const [rating, setRating] = useState(editActivity ? String(editActivity.rating) : '4.5');
+  const [image, setImage] = useState(editActivity?.image ?? '');
+  const [description, setDescription] = useState(editActivity?.description ?? '');
 
-  const price = parseFloat(originalPrice) || 0;
-  const disc = parseFloat(discount) || 0;
-  const dealPrice = +(price * (1 - disc / 100)).toFixed(2);
-  const savings = +(price - dealPrice).toFixed(2);
-  const canSubmit = !!title && !!merchant && !!location && price > 0 && disc > 0 && !!expiry;
+  const priceValue = parseFloat(price) || 0;
+  const ratingValue = parseFloat(rating) || 0;
+  const canSubmit = !!title.trim() && !!venue.trim() && !!location.trim()
+    && priceValue > 0 && !!duration.trim() && !!groupSize.trim()
+    && ratingValue > 0 && ratingValue <= 5;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     onSave({
-      category, title, merchant, location,
-      discount: disc, originalPrice: price, dealPrice, savings, expiry,
-      rating: editDeal?.rating ?? 5.0,
-      image: image || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=600&h=400&fit=crop&auto=format',
-      featured: editDeal?.featured ?? false,
-      terms: editDeal?.terms ?? 'Terms and conditions apply.',
-      description: editDeal?.description ?? `${disc}% off at ${merchant}.`,
-    }, editDeal?.id);
+      category,
+      title: title.trim(),
+      venue: venue.trim(),
+      location: location.trim(),
+      pricePerPerson: priceValue,
+      duration: duration.trim(),
+      groupSize: groupSize.trim(),
+      rating: ratingValue,
+      image: image.trim() || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&h=520&fit=crop&auto=format',
+      description: description.trim() || `A group activity at ${venue.trim()}.`,
+    }, editActivity?.id);
   };
 
   return (
@@ -82,40 +94,45 @@ function AddDealModal({ onClose, onSave, editDeal }: {
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       >
         <div className="flex items-center justify-between p-5 border-b border-border">
-          <h2 className="font-bold text-lg text-foreground">{editDeal ? 'Edit Partner Reward' : 'Add Partner Reward'}</h2>
+          <h2 className="font-bold text-lg text-foreground">{editActivity ? 'Edit Hangout Activity' : 'Add Hangout Activity'}</h2>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
             <X size={16} className="text-foreground" />
           </button>
         </div>
         <div className="overflow-y-auto p-5 flex flex-col gap-3 pb-8">
-          <input placeholder="Reward title" value={title} onChange={(e) => setTitle(e.target.value)}
+          <input placeholder="Activity title" value={title} onChange={(e) => setTitle(e.target.value)}
             className="bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
-          <input placeholder="Merchant name" value={merchant} onChange={(e) => setMerchant(e.target.value)}
+          <input placeholder="Venue" value={venue} onChange={(e) => setVenue(e.target.value)}
             className="bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
-          <input placeholder="Location" value={location} onChange={(e) => setLocation(e.target.value)}
+          <input placeholder="Area (e.g. Bugis)" value={location} onChange={(e) => setLocation(e.target.value)}
             className="bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
-          <div className="flex gap-2">
-            <button onClick={() => setCategory('food')} className={`flex-1 py-3 rounded-xl text-sm font-bold ${category === 'food' ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>Food</button>
-            <button onClick={() => setCategory('attractions')} className={`flex-1 py-3 rounded-xl text-sm font-bold ${category === 'attractions' ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>Attractions</button>
+          <div className="grid grid-cols-4 gap-2">
+            {ACTIVITY_CATEGORIES.map((c) => (
+              <button key={c} onClick={() => setCategory(c)}
+                className={`py-3 rounded-xl text-xs font-bold capitalize ${category === c ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
+                {c}
+              </button>
+            ))}
           </div>
           <div className="flex gap-2">
-            <input type="number" placeholder="Original price (SGD)" value={originalPrice} onChange={(e) => setOriginalPrice(e.target.value)}
+            <input type="number" placeholder="Price per person (SGD)" value={price} onChange={(e) => setPrice(e.target.value)}
               className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
-            <input type="number" placeholder="Discount %" value={discount} onChange={(e) => setDiscount(e.target.value)}
+            <input type="number" step="0.1" max="5" placeholder="Rating" value={rating} onChange={(e) => setRating(e.target.value)}
+              className="w-24 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
+          </div>
+          <div className="flex gap-2">
+            <input placeholder="Duration (e.g. 90 min)" value={duration} onChange={(e) => setDuration(e.target.value)}
+              className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
+            <input placeholder="Group size (e.g. 2-8)" value={groupSize} onChange={(e) => setGroupSize(e.target.value)}
               className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
           </div>
-          {price > 0 && disc > 0 && (
-            <div className="text-xs text-muted-foreground">
-              Reward price: <span className="text-foreground font-bold">SGD {dealPrice.toFixed(2)}</span> &middot; Value: SGD {savings.toFixed(2)}
-            </div>
-          )}
-          <input placeholder="Expiry (e.g. 31 Aug 2026)" value={expiry} onChange={(e) => setExpiry(e.target.value)}
-            className="bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
           <input placeholder="Image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)}
             className="bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none" />
+          <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+            className="bg-secondary rounded-xl px-4 py-3 text-sm text-foreground outline-none resize-none" />
           <button onClick={handleSubmit} disabled={!canSubmit}
             className="w-full py-3.5 rounded-xl bg-primary text-white font-bold text-sm mt-2 disabled:opacity-30">
-            {editDeal ? 'Save Changes' : 'Add Reward'}
+            {editActivity ? 'Save Changes' : 'Add Activity'}
           </button>
         </div>
       </motion.div>
@@ -261,15 +278,16 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 export function AdminAccessPage() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
-  const [adminTab, setAdminTab] = useState<'overview' | 'transactions' | 'deals' | 'merchants'>('overview');
-  const [showAddDeal, setShowAddDeal] = useState(false);
-  const [editingDeal, setEditingDeal] = useState<DealRecord | null>(null);
+  const [adminTab, setAdminTab] = useState<'overview' | 'transactions' | 'hangouts' | 'merchants'>('overview');
+  const [showAddActivity, setShowAddActivity] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [showUsers, setShowUsers] = useState(false);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
   const [chartMetric, setChartMetric] = useState<'count' | 'volume'>('count');
   const [refreshing, setRefreshing] = useState(false);
 
-  const [deals, setDeals] = useState<DealRecord[]>(() => getDeals());
+  const [activities, setActivities] = useState<Activity[]>(() => getActivities());
+  const [hangouts, setHangouts] = useState<Hangout[]>(() => getAllHangouts());
   const [transactions, setTransactions] = useState<Transaction[]>(() => getAllTransactions());
   const [users, setUsers] = useState(() => getAllUsers());
   const [stats, setStats] = useState<AdminStats>(() => getAdminStats());
@@ -282,10 +300,13 @@ export function AdminAccessPage() {
   const [mName, setMName] = useState('');
   const [mAmount, setMAmount] = useState('');
   const [mRef, setMRef] = useState('');
+  const [mXpRate, setMXpRate] = useState(String(DEFAULT_XP_RATE));
+  const [mXpBonus, setMXpBonus] = useState(String(DEFAULT_XP_BONUS));
 
   const reload = () => {
     setCurrentUser(getCurrentUser());
-    setDeals(getDeals());
+    setActivities(getActivities());
+    setHangouts(getAllHangouts());
     setTransactions(getAllTransactions());
     setUsers(getAllUsers());
     setStats(getAdminStats());
@@ -294,7 +315,7 @@ export function AdminAccessPage() {
   };
 
   useAppEvents(
-    ['dealsUpdated', 'rewardRedemptionsUpdated', 'transactionsUpdated', 'redemptionsUpdated', 'userSwitched', 'databaseReady', 'merchantsUpdated', 'focus'],
+    ['activitiesUpdated', 'hangoutsUpdated', 'rewardRedemptionsUpdated', 'transactionsUpdated', 'redemptionsUpdated', 'userSwitched', 'databaseReady', 'merchantsUpdated', 'focus'],
     reload
   );
 
@@ -314,13 +335,12 @@ export function AdminAccessPage() {
   const wow = stats.weekOverWeekTxnChange;
   const wowLabel = wow == null ? null : `${wow >= 0 ? '+' : ''}${wow.toFixed(1)}%`;
   const wowUp = wow == null ? true : wow >= 0;
-  const redeemRate = deals.length ? stats.dealsRedeemed / deals.length : 0;
 
   const statCards = [
-    { key: 'users',  label: 'Total Users',        value: stats.totalUsers.toLocaleString(),        icon: Users,       color: '#1d6bf3', badge: null,      badgeUp: true, action: () => setShowUsers(true) },
-    { key: 'txns',   label: 'Transactions Today',  value: stats.transactionsToday.toLocaleString(), icon: TrendingUp,  color: '#22c55e', badge: wowLabel, badgeUp: wowUp, action: () => setAdminTab('transactions') },
-    { key: 'redeem', label: 'Rewards Redeemed',    value: stats.dealsRedeemed.toLocaleString(),     icon: ShoppingBag, color: '#f2763f', badge: deals.length ? `${redeemRate.toFixed(1)}/offer` : null, badgeUp: true, action: () => setAdminTab('deals') },
-    { key: 'volume', label: 'Wallet Volume (SGD)', value: fmtMoney(stats.walletVolume),             icon: DollarSign,  color: '#8b5cf6', badge: null,      badgeUp: true, action: () => setAdminTab('transactions') },
+    { key: 'users',    label: 'Total Users',         value: stats.totalUsers.toLocaleString(),        icon: Users,      color: '#1d6bf3', badge: null,     badgeUp: true, action: () => setShowUsers(true) },
+    { key: 'txns',     label: 'Transactions Today',  value: stats.transactionsToday.toLocaleString(), icon: TrendingUp, color: '#22c55e', badge: wowLabel, badgeUp: wowUp, action: () => setAdminTab('transactions') },
+    { key: 'hangouts', label: 'Hangouts Planned',    value: stats.hangoutsPlanned.toLocaleString(),   icon: UsersRound, color: '#f2763f', badge: stats.hangoutsPlanned ? `${stats.hangoutsConfirmed} confirmed` : null, badgeUp: true, action: () => setAdminTab('hangouts') },
+    { key: 'volume',   label: 'Wallet Volume (SGD)', value: fmtMoney(stats.walletVolume),             icon: DollarSign, color: '#8b5cf6', badge: null,     badgeUp: true, action: () => setAdminTab('transactions') },
   ];
 
   const series = stats.last7Days;
@@ -328,39 +348,61 @@ export function AdminAccessPage() {
   const maxVal = Math.max(1, ...values);
   const todayIdx = series.length - 1;
 
-  const handleSaveDeal = (d: Omit<DealRecord, 'id' | 'redeemedCount'>, editId?: number) => {
+  const handleSaveActivity = (activity: Omit<Activity, 'id'>, editId?: number) => {
     if (editId != null) {
-      const existing = deals.find(x => x.id === editId);
-      updateDeal({ ...d, id: editId, redeemedCount: existing?.redeemedCount ?? 0 });
+      updateActivity({ ...activity, id: editId });
+      toast.success('Activity updated');
     } else {
-      addDeal(d);
+      addActivity(activity);
+      toast.success('Activity added');
     }
     reload();
-    setShowAddDeal(false);
-    setEditingDeal(null);
+    setShowAddActivity(false);
+    setEditingActivity(null);
   };
 
-  const handleDeleteDeal = (deal: DealRecord) => {
-    if (!confirm(`Delete "${deal.title}"?\n\nThis removes the partner reward from the catalogue. This cannot be undone.`)) return;
-    deleteDeal(deal.id);
+  const handleDeleteActivity = (activity: Activity) => {
+    if (!confirm(`Delete "${activity.title}"?\n\nIt is removed from the Hangouts catalogue. Existing plans that already chose it are not affected.`)) return;
+    deleteActivity(activity.id);
     reload();
   };
 
   // Merchant handlers
-  const openNewMerchant = () => { setMerchantIsNew(true); setMerchantEditing(null); setMName(''); setMAmount(''); setMRef(''); };
-  const openEditMerchant = (m: Merchant) => { setMerchantIsNew(false); setMerchantEditing(m); setMName(m.name); setMAmount(m.amount.toFixed(2)); setMRef(m.reference ?? ''); };
+  const openNewMerchant = () => {
+    setMerchantIsNew(true); setMerchantEditing(null);
+    setMName(''); setMAmount(''); setMRef('');
+    setMXpRate(String(DEFAULT_XP_RATE)); setMXpBonus(String(DEFAULT_XP_BONUS));
+  };
+  const openEditMerchant = (m: Merchant) => {
+    setMerchantIsNew(false); setMerchantEditing(m);
+    setMName(m.name); setMAmount(m.amount.toFixed(2)); setMRef(m.reference ?? '');
+    setMXpRate(String(m.xpRate)); setMXpBonus(String(m.xpBonus));
+  };
   const closeMerchantForm = () => { setMerchantEditing(null); setMerchantIsNew(false); };
   const saveMerchantForm = () => {
     const trimmed = mName.trim();
     const parsed = parseFloat(mAmount);
+    const xpRate = parseFloat(mXpRate);
+    const xpBonus = parseFloat(mXpBonus);
     if (!trimmed) { toast.error('Please enter a merchant name'); return; }
     if (isNaN(parsed) || parsed <= 0) { toast.error('Please enter a valid amount greater than 0'); return; }
-    saveMerchant({ id: merchantEditing ? merchantEditing.id : makeMerchantId(trimmed), name: trimmed, amount: parsed, reference: mRef.trim() || undefined });
+    if (isNaN(xpRate) || xpRate < 0) { toast.error('XP per $1 must be 0 or more'); return; }
+    if (isNaN(xpBonus) || xpBonus < 1) { toast.error('XP multiplier must be at least 1'); return; }
+    saveMerchant({
+      id: merchantEditing ? merchantEditing.id : makeMerchantId(trimmed),
+      name: trimmed, amount: parsed, reference: mRef.trim() || undefined,
+      xpRate, xpBonus,
+    });
     toast.success(merchantEditing ? 'Merchant updated' : 'Merchant added');
     closeMerchantForm();
     setMerchants(getMerchants());
   };
-  const removeMerchant = (m: Merchant) => { deactivateMerchant(m.id); toast.success(`${m.name} removed`); setMerchants(getMerchants()); };
+  const removeMerchant = (m: Merchant) => {
+    if (!confirm(`Remove "${m.name}"?\n\nIt will no longer be scannable on the pay screen.`)) return;
+    deactivateMerchant(m.id);
+    toast.success(`${m.name} removed`);
+    setMerchants(getMerchants());
+  };
   const showMerchantForm = merchantIsNew || merchantEditing !== null;
 
   return (
@@ -392,10 +434,10 @@ export function AdminAccessPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 px-4 py-3 bg-white border-b border-border flex-shrink-0 overflow-x-auto">
-        {(['overview', 'transactions', 'deals', 'merchants'] as const).map((t) => (
+        {(['overview', 'transactions', 'hangouts', 'merchants'] as const).map((t) => (
           <button key={t} onClick={() => setAdminTab(t)}
             className={`px-3 py-1.5 rounded-full text-xs font-bold capitalize transition-all whitespace-nowrap ${adminTab === t ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
-            {t === 'deals' ? 'Rewards' : t}
+            {t}
           </button>
         ))}
       </div>
@@ -503,39 +545,83 @@ export function AdminAccessPage() {
           </div>
         )}
 
-        {adminTab === 'deals' && (
+        {adminTab === 'hangouts' && (
           <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="font-bold text-foreground text-sm">Partner Reward Catalogue</div>
-              <button className="text-primary text-xs font-bold" onClick={() => setShowAddDeal(true)}>+ Add Reward</button>
+            <div className="bg-secondary rounded-2xl p-4 mb-4 flex items-center gap-3">
+              <UsersRound className="w-6 h-6 text-primary" />
+              <div>
+                <p className="text-foreground font-bold text-sm">Hangouts Catalogue</p>
+                <p className="text-muted-foreground text-xs">
+                  {activities.length} activit{activities.length === 1 ? 'y' : 'ies'} available · {hangouts.length} plan{hangouts.length === 1 ? '' : 's'} created
+                </p>
+              </div>
             </div>
-            <div className="flex flex-col gap-3">
-              {deals.map((deal) => (
-                <div key={deal.id} className="bg-white rounded-2xl p-3 border-2 border-border flex items-center gap-3">
-                  <img src={deal.image} alt={deal.title} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-bold text-foreground text-sm">Activities</div>
+              <button className="text-primary text-xs font-bold" onClick={() => { setEditingActivity(null); setShowAddActivity(true); }}>+ Add Activity</button>
+            </div>
+            <div className="flex flex-col gap-3 mb-6">
+              {activities.length === 0 && (
+                <div className="p-6 text-center text-xs text-muted-foreground border-2 border-border rounded-2xl">No activities in the catalogue.</div>
+              )}
+              {activities.map((activity) => (
+                <div key={activity.id} className="bg-white rounded-2xl p-3 border-2 border-border flex items-center gap-3">
+                  <img src={activity.image} alt={activity.title} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-foreground text-xs font-bold truncate">{deal.title}</div>
-                    <div className="text-muted-foreground text-xs">{deal.merchant}</div>
+                    <div className="text-foreground text-xs font-bold truncate">{activity.title}</div>
+                    <div className="text-muted-foreground text-xs truncate">{activity.venue} · {activity.location}</div>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#fde8dd', color: '#f2763f' }}>
-                        {deal.discount}% off
+                      <span className="text-xs px-1.5 py-0.5 rounded-full font-bold capitalize" style={{ background: '#fde8dd', color: '#f2763f' }}>
+                        {activity.category}
                       </span>
-                      <span className="text-muted-foreground text-xs">{deal.redeemedCount} redeemed</span>
+                      <span className="text-muted-foreground text-xs">${activity.pricePerPerson}/pax · {activity.duration}</span>
                     </div>
-                    <div className="text-muted-foreground text-xs mt-0.5">Expires {deal.expiry}</div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <button onClick={() => { setEditingDeal(deal); setShowAddDeal(true); }}
-                      className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center" aria-label="Edit reward">
+                    <button onClick={() => { setEditingActivity(activity); setShowAddActivity(true); }}
+                      className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center" aria-label="Edit activity">
                       <Pencil className="w-4 h-4 text-foreground" />
                     </button>
-                    <button onClick={() => handleDeleteDeal(deal)}
-                      className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center" aria-label="Delete reward">
+                    <button onClick={() => handleDeleteActivity(activity)}
+                      className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center" aria-label="Delete activity">
                       <Trash2 className="w-4 h-4 text-red-500" />
                     </button>
                   </div>
                 </div>
               ))}
+            </div>
+
+            <div className="font-bold text-foreground text-sm mb-3">Group plans</div>
+            <div className="bg-white rounded-2xl border-2 border-border overflow-hidden">
+              {hangouts.length === 0 && (
+                <div className="p-6 text-center text-xs text-muted-foreground">No group plans yet.</div>
+              )}
+              {hangouts.map((plan, i) => {
+                const votes = getHangoutVotes(plan.id);
+                const participants = getParticipantIds(plan).length;
+                const confirmed = plan.confirmedActivityId ? getActivity(plan.confirmedActivityId) : null;
+                return (
+                  <div key={plan.id} className={`p-4 ${i < hangouts.length - 1 ? 'border-b border-border' : ''}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-foreground text-xs font-bold truncate">{plan.name}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {userName(plan.ownerUserId)} · {plan.preferredDate} · ${plan.budgetPerPerson}/pax
+                        </div>
+                      </div>
+                      <span className={`text-xs px-2 py-1 rounded-full font-bold capitalize flex-shrink-0 ${plan.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {plan.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2 text-muted-foreground text-xs">
+                      <Vote size={12} />
+                      {votes.length}/{participants} voted
+                      {confirmed && <span className="text-foreground font-semibold truncate">· {confirmed.title}</span>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -572,6 +658,27 @@ export function AdminAccessPage() {
                 <label className="text-xs text-muted-foreground mb-2 block">Reference (optional)</label>
                 <input value={mRef} onChange={(e) => setMRef(e.target.value)} placeholder="e.g. Set A"
                   className="w-full mb-4 px-4 py-3 rounded-xl bg-secondary text-foreground outline-none" />
+
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Zap className="w-4 h-4 text-primary" />
+                  <span className="text-xs font-bold text-foreground">XP earning</span>
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <div className="flex-1">
+                    <label className="text-xs text-muted-foreground mb-1 block">XP per $1</label>
+                    <input value={mXpRate} onChange={(e) => setMXpRate(e.target.value)} inputMode="decimal" placeholder="10"
+                      className="w-full px-4 py-3 rounded-xl bg-secondary text-foreground outline-none" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-muted-foreground mb-1 block">Multiplier</label>
+                    <input value={mXpBonus} onChange={(e) => setMXpBonus(e.target.value)} inputMode="decimal" placeholder="1"
+                      className="w-full px-4 py-3 rounded-xl bg-secondary text-foreground outline-none" />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mb-4">
+                  A $10 payment here earns {Math.max(0, Math.round(10 * (parseFloat(mXpRate) || 0) * (parseFloat(mXpBonus) || 0)))} XP.
+                </p>
+
                 <button onClick={saveMerchantForm} className="w-full py-3 rounded-xl bg-primary text-white font-bold">
                   {merchantEditing ? 'Save Changes' : 'Add Merchant'}
                 </button>
@@ -591,6 +698,9 @@ export function AdminAccessPage() {
                     <div className="min-w-0">
                       <p className="font-bold text-foreground truncate">{m.name}</p>
                       <p className="text-xs text-muted-foreground mt-1">${m.amount.toFixed(2)}{m.reference ? ` · ${m.reference}` : ''}</p>
+                      <p className="text-xs text-primary font-semibold mt-1 flex items-center gap-1">
+                        <Zap className="w-3 h-3" />{m.xpRate} XP/$1{m.xpBonus > 1 ? ` · ${m.xpBonus}x bonus` : ''}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-3">
                       <button onClick={() => openEditMerchant(m)} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center">
@@ -609,12 +719,12 @@ export function AdminAccessPage() {
       </div>
 
       <AnimatePresence>
-        {showAddDeal && (
-          <AddDealModal
-            key={editingDeal ? `edit-${editingDeal.id}` : 'add-deal'}
-            editDeal={editingDeal}
-            onClose={() => { setShowAddDeal(false); setEditingDeal(null); }}
-            onSave={handleSaveDeal}
+        {showAddActivity && (
+          <ActivityModal
+            key={editingActivity ? `edit-${editingActivity.id}` : 'add-activity'}
+            editActivity={editingActivity}
+            onClose={() => { setShowAddActivity(false); setEditingActivity(null); }}
+            onSave={handleSaveActivity}
           />
         )}
         {showUsers && <UsersModal key="users" users={userActivity} onClose={() => setShowUsers(false)} />}

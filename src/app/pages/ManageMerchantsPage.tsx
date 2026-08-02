@@ -9,6 +9,8 @@ import {
   getMerchants,
   saveMerchant,
   deactivateMerchant,
+  DEFAULT_XP_BONUS,
+  DEFAULT_XP_RATE,
   type Merchant,
 } from '../utils/merchantStorage';
 
@@ -73,6 +75,8 @@ export function ManageMerchantsPage() {
       name: trimmedName,
       amount: parsedAmount,
       reference: reference.trim() || undefined,
+      xpRate: editing?.xpRate ?? DEFAULT_XP_RATE,
+      xpBonus: editing?.xpBonus ?? DEFAULT_XP_BONUS,
     });
 
     toast.success(editing ? 'Merchant updated' : 'Merchant added');

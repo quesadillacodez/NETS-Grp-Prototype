@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router';
 import { motion } from 'motion/react';
 import {
   ArrowLeft, Sparkles, TrendingUp, TrendingDown, AlertCircle, CheckCircle2,
-  Lightbulb, Target, Plus, X, Wallet, PieChart as PieIcon,
+  Lightbulb, Target, Plus, X, Wallet, PieChart as PieIcon, PartyPopper,
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { AreaChart, Area, XAxis, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { getCurrentUser } from '../utils/userStorage';
 import { useAppEvents } from '../utils/useAppEvents';
@@ -246,6 +247,16 @@ function Legend({ color, label }: { color: string; label: string }) {
 function GoalsTab({ userId, goals }: { userId: string; goals: Goal[] }) {
   const [contributing, setContributing] = useState<Goal | null>(null);
   const [adding, setAdding] = useState(false);
+  const [celebrating, setCelebrating] = useState<Goal | null>(null);
+
+  const contribute = (goal: Goal, amount: number) => {
+    contributeToGoal(goal.id, amount);
+    setContributing(null);
+    if (goal.current < goal.target && goal.current + amount >= goal.target) {
+      setCelebrating(goal);
+      confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#00a94f', '#ffca28', '#1565c0', '#ec4899'] });
+    }
+  };
 
   return (
     <div className="p-4 space-y-3">
@@ -256,28 +267,61 @@ function GoalsTab({ userId, goals }: { userId: string; goals: Goal[] }) {
 
       {goals.map((g) => {
         const pct = Math.min(Math.round((g.current / g.target) * 100), 100);
+        const reached = g.current >= g.target;
         return (
-          <div key={g.id} className="bg-white rounded-2xl border-2 border-border p-4">
+          <div key={g.id} className={`bg-white rounded-2xl border-2 p-4 ${reached ? 'border-success' : 'border-border'}`}>
             <div className="flex items-center gap-3 mb-3">
               <span className="text-2xl">{g.icon}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-foreground font-bold text-sm truncate">{g.name}</div>
                 <div className="text-muted-foreground text-xs">{money2(g.current)} of {money2(g.target)}{g.deadline ? ` · ${g.deadline}` : ''}</div>
               </div>
-              <button onClick={() => setContributing(g)} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold flex-shrink-0">Add</button>
+              {reached ? (
+                <span className="px-2.5 py-1.5 rounded-lg bg-success/10 text-success text-xs font-bold flex-shrink-0">Reached</span>
+              ) : (
+                <button onClick={() => setContributing(g)} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold flex-shrink-0">Add</button>
+              )}
             </div>
             <div className="h-2.5 rounded-full bg-secondary overflow-hidden">
               <motion.div className="h-full rounded-full" style={{ background: g.color }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.7 }} />
             </div>
-            <div className="text-right text-xs font-bold mt-1" style={{ color: g.color }}>{pct}%</div>
+            {reached ? (
+              <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                className="mt-2 flex items-center gap-2 rounded-xl bg-success/10 px-3 py-2 text-xs font-bold text-success">
+                <PartyPopper size={14} /> 🎉 Yay! You've reached your savings goal!
+              </motion.div>
+            ) : (
+              <div className="text-right text-xs font-bold mt-1" style={{ color: g.color }}>{pct}%</div>
+            )}
           </div>
         );
       })}
 
       {contributing && <ContributeModal goal={contributing} onClose={() => setContributing(null)}
-        onConfirm={(amt) => { contributeToGoal(contributing.id, amt); setContributing(null); }} />}
+        onConfirm={(amt) => contribute(contributing, amt)} />}
       {adding && <AddGoalModal onClose={() => setAdding(false)}
         onAdd={(g) => { addGoal(userId, g); setAdding(false); }} />}
+      {celebrating && <GoalReachedModal goal={celebrating} onClose={() => setCelebrating(null)} />}
+    </div>
+  );
+}
+
+function GoalReachedModal({ goal, onClose }: { goal: Goal; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-6" style={{ maxWidth: 390, margin: '0 auto' }}>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <motion.div className="relative w-full rounded-3xl bg-white p-6 text-center shadow-2xl"
+        initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }}>
+        <motion.div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-full bg-success/10 text-3xl"
+          animate={{ rotate: [0, 12, -12, 0], scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity }}>
+          {goal.icon}
+        </motion.div>
+        <h2 className="text-xl font-black text-foreground">🎉 Yay! You've reached your savings goal!</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Congratulations — <span className="font-bold text-foreground">{goal.name}</span> is fully funded at {money2(goal.target)}.
+        </p>
+        <button onClick={onClose} className="mt-5 w-full rounded-2xl bg-primary py-3.5 text-sm font-black text-white">Nice!</button>
+      </motion.div>
     </div>
   );
 }

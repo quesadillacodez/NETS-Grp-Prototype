@@ -17,7 +17,7 @@ import { getXPStats } from '../utils/rewardStorage';
 const BASE_BALANCE = 2500.00;
 
 const QUICK_ACTIONS = [
-  { icon: CreditCard, label: 'Top-up',    path: null },
+  { icon: CreditCard, label: 'Top-up',    path: '/top-up' },
   { icon: History,    label: 'History',   path: '/all-transactions' },
   { icon: Split,      label: 'Split Bill', path: '/scan' },
   { icon: Bell,       label: 'Reminders', path: '/reminders' },
@@ -144,24 +144,6 @@ export function HomePage() {
 
       <div className="flex-1 px-4 py-3 overflow-y-auto pb-20 space-y-3">
 
-        <motion.div
-          initial={{ y: 10, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.15 }}
-          className="bg-accent rounded-2xl p-3 flex items-center gap-3"
-        >
-          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-black text-white leading-tight">Auto Top-up Available!</p>
-            <p className="text-xs text-white/80 leading-tight truncate">Never worry about low balance again</p>
-          </div>
-          <button className="px-3 py-1.5 bg-white text-accent rounded-lg text-xs font-black flex-shrink-0">
-            Enable ✨
-          </button>
-        </motion.div>
-
         <div className="grid grid-cols-2 gap-3">
           <motion.button
             initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
@@ -170,7 +152,7 @@ export function HomePage() {
           >
             <div className="w-9 h-9 rounded-xl bg-[#2563eb] text-white flex items-center justify-center mb-2"><UsersRound size={18} /></div>
             <p className="text-xs font-black text-foreground">Plan a Hangout</p>
-            <p className="mt-1 text-[10px] leading-tight text-muted-foreground">Shortlist ideas and let friends vote</p>
+            <p className="mt-1 text-[10px] leading-tight text-muted-foreground">Favourite ideas and let friends vote</p>
           </motion.button>
           <motion.button
             initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.04 }}

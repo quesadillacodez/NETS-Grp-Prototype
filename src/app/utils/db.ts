@@ -113,7 +113,24 @@ CREATE TABLE IF NOT EXISTS merchants (
   name       TEXT NOT NULL,
   amount     REAL NOT NULL,
   reference  TEXT,
-  active     INTEGER DEFAULT 1
+  active     INTEGER DEFAULT 1,
+  xp_rate    REAL DEFAULT 10,
+  xp_bonus   REAL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS activities (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  category         TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  venue            TEXT NOT NULL,
+  location         TEXT NOT NULL,
+  price_per_person REAL NOT NULL,
+  duration         TEXT NOT NULL,
+  group_size       TEXT NOT NULL,
+  rating           REAL DEFAULT 4.5,
+  image            TEXT NOT NULL,
+  description      TEXT NOT NULL,
+  active           INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS app_meta (
@@ -291,6 +308,19 @@ export async function initDatabase(): Promise<void> {
   } catch (e) {
     console.warn('transactions.created_at migration skipped:', e);
   }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(merchants)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('xp_rate')) {
+      db.run('ALTER TABLE merchants ADD COLUMN xp_rate REAL DEFAULT 10');
+    }
+    if (!names.includes('xp_bonus')) {
+      db.run('ALTER TABLE merchants ADD COLUMN xp_bonus REAL DEFAULT 1');
+    }
+  } catch (e) {
+    console.warn('merchants XP migration skipped:', e);
+  }
 }
 
 function scheduleSave(): void {
@@ -366,6 +396,7 @@ export function resetDatabase(): void {
     DELETE FROM processed_payments;
     DELETE FROM deals;
     DELETE FROM merchants;
+    DELETE FROM activities;
     UPDATE users SET
       reminder_frequency = 'daily',
       auto_reminders_enabled = 1,

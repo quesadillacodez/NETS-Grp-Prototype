@@ -170,51 +170,6 @@ export function getDeals(): Deal[] {
   return query('SELECT * FROM deals ORDER BY id').map(rowToDeal);
 }
 
-export function addDeal(deal: Omit<Deal, 'id' | 'redeemedCount'>): Deal {
-  const id = Date.now();
-  run(
-    `INSERT INTO deals
-       (id, category, title, merchant, location, discount, original_price,
-        deal_price, savings, expiry, rating, image, featured, terms, description, redeemed_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-    [
-      id, deal.category, deal.title, deal.merchant, deal.location, deal.discount,
-      deal.originalPrice, deal.dealPrice, deal.savings, deal.expiry, deal.rating,
-      deal.image, deal.featured ? 1 : 0, deal.terms, deal.description,
-    ]
-  );
-  notifyUpdated();
-  return { ...deal, id, redeemedCount: 0 };
-}
-
-// Updates an existing deal's editable fields (keeps id and redeemed_count).
-export function updateDeal(deal: Deal): void {
-  run(
-    `UPDATE deals SET
-       category = ?, title = ?, merchant = ?, location = ?, discount = ?,
-       original_price = ?, deal_price = ?, savings = ?, expiry = ?, rating = ?,
-       image = ?, featured = ?, terms = ?, description = ?
-     WHERE id = ?`,
-    [
-      deal.category, deal.title, deal.merchant, deal.location, deal.discount,
-      deal.originalPrice, deal.dealPrice, deal.savings, deal.expiry, deal.rating,
-      deal.image, deal.featured ? 1 : 0, deal.terms, deal.description, deal.id,
-    ]
-  );
-  notifyUpdated();
-}
-
-// Deletes a deal and any redemptions/saved rows that point to it, so the deal
-// figures stay consistent.
-export function deleteDeal(dealId: number): void {
-  run('DELETE FROM redemptions WHERE deal_id = ?', [dealId]);
-  run('DELETE FROM saved_deals WHERE deal_id = ?', [dealId]);
-  run('DELETE FROM deals WHERE id = ?', [dealId]);
-  notifyUpdated();
-  window.dispatchEvent(new CustomEvent('redemptionsUpdated'));
-  window.dispatchEvent(new CustomEvent('savedDealsUpdated'));
-}
-
 export function incrementDealRedeemed(dealId: number): void {
   run('UPDATE deals SET redeemed_count = redeemed_count + 1 WHERE id = ?', [dealId]);
   notifyUpdated();

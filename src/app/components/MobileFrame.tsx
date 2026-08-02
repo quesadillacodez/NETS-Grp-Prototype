@@ -1,10 +1,12 @@
 import { ReactNode, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { getCurrentUser, isAdminUser } from '../utils/userStorage';
+import { isLoggedIn } from '../utils/authStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 
 interface MobileFrameProps {
   children: ReactNode;
+  requiresAuth?: boolean;
 }
 
 // Pages an admin IS allowed to stay on. Everything else redirects to /admin.
@@ -14,7 +16,7 @@ function AdminRedirectGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [tick, setTick] = useState(0);
-  useAppEvents(['userSwitched', 'databaseReady'], () => setTick((t) => t + 1));
+  useAppEvents(['userSwitched', 'databaseReady', 'sessionChanged'], () => setTick((t) => t + 1));
 
   const admin = isAdminUser(getCurrentUser());
   const path = location.pathname;
@@ -32,11 +34,26 @@ function AdminRedirectGuard() {
   return null;
 }
 
-export function MobileFrame({ children }: MobileFrameProps) {
+// Signed-out visitors go to the login screen; only once a session exists does the
+// admin/user routing guard get a say, so the two can't fight over a redirect.
+function SessionGuard() {
+  const navigate = useNavigate();
+  const [tick, setTick] = useState(0);
+  useAppEvents(['sessionChanged', 'databaseReady'], () => setTick((t) => t + 1));
+  void tick;
+
+  if (!isLoggedIn()) {
+    queueMicrotask(() => navigate('/login', { replace: true }));
+    return null;
+  }
+  return <AdminRedirectGuard />;
+}
+
+export function MobileFrame({ children, requiresAuth = true }: MobileFrameProps) {
   return (
     <div className="flex items-center justify-center min-h-screen bg-slate-100">
       <div className="relative w-full max-w-[390px] h-screen bg-white overflow-hidden">
-        <AdminRedirectGuard />
+        {requiresAuth && <SessionGuard />}
         {children}
       </div>
     </div>

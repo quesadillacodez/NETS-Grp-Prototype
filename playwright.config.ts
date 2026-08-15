@@ -1,7 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 5173;
-const BASE_URL = `http://localhost:${PORT}`;
+// The suite runs against a production preview build, not the dev server.
+//
+// `npm run dev` enables a dev-only feature that mirrors the entire database to
+// disk after every write: it exports the whole SQLite file, base64-encodes it,
+// snapshots every table and POSTs the lot to the Vite middleware. That work
+// grows with the data a test creates and runs on the browser's main thread, so
+// on a slow CI runner it delayed sign-in past the assertion timeout and made
+// the suite flaky. A preview build has none of that, and it exercises the same
+// bundle that actually ships.
+const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
 // The app is a phone-sized experience, so the default viewport matches the
 // 390px frame the UI is designed around. The `compact-phone` project re-runs
@@ -51,10 +60,11 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npm run dev',
+    command: 'npm run build && npm run preview',
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    // Includes a production build, so allow more than a bare server start.
+    timeout: 180_000,
     stdout: 'ignore',
     stderr: 'pipe',
   },

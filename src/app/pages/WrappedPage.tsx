@@ -1,6 +1,7 @@
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { BottomNav } from "../components/BottomNav";
+import { ShareSheet, type ShareSheetAction } from "../components/ShareSheet";
 import { getCurrentUser } from "../utils/userStorage";
 import {
   getWrappedTransactions,
@@ -10,13 +11,18 @@ import {
   getAvailableMonths,
   getSplitBillStats,
   getSpendingComparison,
+  getTopMerchants,
+  getFunEquivalent,
+  getBusiestDay,
   type WrappedTxn,
 } from "../utils/wrappedData";
 import { useAppEvents } from "../utils/useAppEvents";
+import { fxTick, fxCelebrate, haptic, isFxEnabled, setFxEnabled } from "../utils/feedback";
+import { buildSharePayload, buildCompareUrl, copyToClipboard } from "../utils/wrappedShare";
 import {
-  Sparkles, TrendingUp, TrendingDown, ShoppingBag, Award, Calendar,
+  Sparkles, TrendingUp, TrendingDown, ShoppingBag, Award, Calendar, CalendarClock,
   ChevronLeft, ChevronRight, DollarSign, UserX, Clock, Bell, Eye, EyeOff,
-  Share2, Users, Play, Pause, X, Home,
+  Share2, Users, Play, Pause, X, Home, Volume2, VolumeX, Heart, Download, Link2,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useState, useRef, useEffect } from "react";
@@ -164,14 +170,14 @@ function StoryProgress({ total, current, isPlaying }: { total: number; current: 
 // The full slide order. The component builds its actual deck from this,
 // skipping any slide whose data is empty (so no blank slides ever show).
 const SLIDE_ORDER = [
-  "intro", "personality", "total-spent", "transactions", "top-category",
-  "biggest-purchase", "top-merchant", "most-paid", "biggest-debtor",
+  "intro", "personality", "total-spent", "fun-equivalence", "transactions", "top-category",
+  "biggest-purchase", "top-merchant", "busiest-day", "most-paid", "biggest-debtor",
   "slowest-payer", "most-reminders", "summary",
 ] as const;
 
 type EnabledStats = {
-  personality: boolean; totalSpent: boolean; transactions: boolean;
-  topCategory: boolean; biggestPurchase: boolean; topMerchant: boolean;
+  personality: boolean; totalSpent: boolean; funEquivalent: boolean; transactions: boolean;
+  topCategory: boolean; biggestPurchase: boolean; topMerchant: boolean; busiestDay: boolean;
   mostPaid: boolean; biggestDebtor: boolean; slowestPayer: boolean;
   mostReminders: boolean;
 };
@@ -257,10 +263,15 @@ export function WrappedPage() {
   const [hasSeenEyeHint, setHasSeenEyeHint] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [txnsData, setTxnsData] = useState<WrappedTxn[]>(() => getWrappedTransactions(getCurrentUser().id));
+  const [fxOn, setFxOn] = useState(isFxEnabled());
+  const [hearts, setHearts] = useState<{ id: number; x: number; y: number }[]>([]);
+  const [shareSheetOpen, setShareSheetOpen] = useState(false);
+  const [shareContext, setShareContext] = useState<"slide" | "summary">("slide");
   const summaryRef = useRef<HTMLDivElement>(null);
   const currentSlideRef = useRef<HTMLDivElement>(null);
   const touchStartXRef = useRef(0);
   const didSwipeRef = useRef(false);
+  const heartIdRef = useRef(0);
 
   // Reload from DB when the user switches or data changes.
   useAppEvents(["userSwitched", "transactionsUpdated", "remindersUpdated", "databaseReady", "focus"], () => {
@@ -276,14 +287,17 @@ export function WrappedPage() {
   const selectedMonth = availableMonths[clampedIndex] || { year: new Date().getFullYear(), month: new Date().getMonth() };
 
   const [enabledStats, setEnabledStats] = useState<EnabledStats>({
-    personality: true, totalSpent: true, transactions: true, topCategory: true,
-    biggestPurchase: true, topMerchant: true, mostPaid: true, biggestDebtor: true,
+    personality: true, totalSpent: true, funEquivalent: true, transactions: true, topCategory: true,
+    biggestPurchase: true, topMerchant: true, busiestDay: true, mostPaid: true, biggestDebtor: true,
     slowestPayer: true, mostReminders: true,
   });
 
   const personality = getFinancialPersonality(selectedMonth.year, selectedMonth.month, txns);
   const stats = getWrappedStats(selectedMonth.year, selectedMonth.month, txns);
   const categories = calculateSpendingByCategory(selectedMonth.year, selectedMonth.month, txns);
+  const topMerchants = getTopMerchants(selectedMonth.year, selectedMonth.month, txns);
+  const funEquivalent = getFunEquivalent(stats.totalSpent);
+  const busiestDay = getBusiestDay(selectedMonth.year, selectedMonth.month, txns);
   const splitBillStats = getSplitBillStats(currentUser.id, selectedMonth.year, selectedMonth.month);
   const comparison = getSpendingComparison(selectedMonth.year, selectedMonth.month, txns);
   const monthName = format(new Date(selectedMonth.year, selectedMonth.month), "MMMM yyyy");
@@ -291,8 +305,11 @@ export function WrappedPage() {
   // Build the actual deck for this user + month — skip any slide with no data
   // so nothing ever renders blank.
   const slides = SLIDE_ORDER.filter((s) => {
+    if (s === "fun-equivalence") return !!funEquivalent;
     if (s === "top-category") return categories.length > 0;
     if (s === "biggest-purchase") return !!stats.biggestPurchase;
+    if (s === "top-merchant") return topMerchants.length > 0;
+    if (s === "busiest-day") return !!busiestDay;
     if (s === "biggest-debtor") return !!splitBillStats?.biggestDebtor;
     if (s === "slowest-payer") return !!splitBillStats?.slowestPayer;
     if (s === "most-reminders") return !!splitBillStats?.mostReminders;
@@ -308,8 +325,8 @@ export function WrappedPage() {
 
   const goToPreviousMonth = () => { if (clampedIndex < availableMonths.length - 1) { setSelectedMonthIndex(clampedIndex + 1); setCurrentSlide(0); } };
   const goToNextMonth = () => { if (clampedIndex > 0) { setSelectedMonthIndex(clampedIndex - 1); setCurrentSlide(0); } };
-  const nextSlide = () => { setIsPlaying(false); if (currentSlide < slides.length - 1) setCurrentSlide(currentSlide + 1); };
-  const prevSlide = () => { setIsPlaying(false); if (currentSlide > 0) setCurrentSlide(currentSlide - 1); };
+  const nextSlide = () => { fxTick(); setIsPlaying(false); if (currentSlide < slides.length - 1) setCurrentSlide(currentSlide + 1); };
+  const prevSlide = () => { fxTick(); setIsPlaying(false); if (currentSlide > 0) setCurrentSlide(currentSlide - 1); };
   const startWrapped = () => { setHasStarted(true); setCurrentSlide(0); };
   const restart = () => { setHasStarted(false); setCurrentSlide(0); };
 
@@ -333,8 +350,10 @@ export function WrappedPage() {
     const slide = slides[currentSlide];
     if (slide === "personality") {
       confetti({ particleCount: 90, spread: 75, origin: { y: 0.4 }, colors: ["#a855f7", "#ec4899", "#fbbf24", "#38bdf8"] });
+      fxCelebrate();
     } else if (slide === "summary") {
       confetti({ particleCount: 120, spread: 90, origin: { y: 0.35 }, colors: ["#0040ff", "#a855f7", "#ec4899", "#fbbf24", "#22c55e"] });
+      fxCelebrate();
     }
   }, [currentSlide, hasStarted]);
 
@@ -353,19 +372,26 @@ export function WrappedPage() {
     if (didSwipeRef.current) { didSwipeRef.current = false; return; }
     handleSlideAreaClick(e);
   };
+  const handleDoubleTapHeart = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const id = ++heartIdRef.current;
+    setHearts((h) => [...h, { id, x: e.clientX - rect.left, y: e.clientY - rect.top }]);
+    haptic("medium");
+  };
 
-  const captureAndShare = async (ref: React.RefObject<HTMLDivElement | null>, filename: string) => {
+  const captureAndShare = async (ref: React.RefObject<HTMLDivElement | null>, filename: string, mode: "download" | "share") => {
     if (!ref.current) return;
     setIsCapturing(true);
     try {
       const dataUrl = await toPng(ref.current, { cacheBust: true, pixelRatio: 2, backgroundColor: "#ffffff" });
-      if (navigator.share && navigator.canShare) {
+      if (mode === "share") {
+        if (!navigator.share || !navigator.canShare) { toast.error("Sharing isn't supported on this device/browser — try Save Image instead."); return; }
         const blob = await (await fetch(dataUrl)).blob();
         const file = new File([blob], filename, { type: "image/png" });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: `My ${monthName} NETS Wrapped` });
-          return;
-        }
+        if (!navigator.canShare({ files: [file] })) { toast.error("Sharing isn't supported on this device/browser — try Save Image instead."); return; }
+        await navigator.share({ files: [file], title: `My ${monthName} NETS Wrapped` });
+        return;
       }
       const link = document.createElement("a");
       link.download = filename; link.href = dataUrl; link.click();
@@ -376,7 +402,27 @@ export function WrappedPage() {
     } finally { setIsCapturing(false); }
   };
 
-  const handleShare = () => captureAndShare(summaryRef, `nets-wrapped-${monthName.replace(/ /g, "-")}.png`);
+  const summaryFilename = `nets-wrapped-${monthName.replace(/ /g, "-")}.png`;
+
+  const handleCopyCompareLink = async () => {
+    const payload = buildSharePayload({
+      userName: currentUser.name, year: selectedMonth.year, month: selectedMonth.month,
+      enabled: enabledStats,
+      personalityTitle: personality.title, personalityDescription: personality.description,
+      totalSpent: stats.totalSpent, totalTransactions: stats.totalTransactions,
+      topCategoryName: categories[0]?.name, topCategoryValue: categories[0]?.value,
+      biggestPurchaseMerchant: stats.biggestPurchase?.merchant,
+      biggestPurchaseAmount: stats.biggestPurchase ? Math.abs(stats.biggestPurchase.amount) : undefined,
+      topMerchantName: stats.topMerchant.name, topMerchantCount: stats.topMerchant.count,
+      mostPaidName: stats.mostPaidPerson.name, mostPaidAmount: stats.mostPaidPerson.amount,
+    });
+    const url = buildCompareUrl(payload);
+    const ok = await copyToClipboard(url);
+    if (ok) toast.success("Compare link copied!", { description: "Send it to a friend — they can log in and see how their month compares." });
+    else toast.error("Couldn't copy the link. Try again.");
+  };
+
+  const handleShare = () => { haptic("light"); setShareContext("summary"); setShareSheetOpen(true); };
 
   // ── Start / empty screen ──────────────────────────────────────────────────
   if (!hasStarted) {
@@ -445,19 +491,79 @@ export function WrappedPage() {
   }
 
   const slideFilename = `nets-wrapped-${monthName.replace(/ /g, "-")}-${slides[currentSlide]}.png`;
-  const slideProps = { enabledStats, toggleStat, slideRef: currentSlideRef, isCapturing, onShare: () => captureAndShare(currentSlideRef, slideFilename) };
+  const slideProps = {
+    enabledStats, toggleStat, slideRef: currentSlideRef, isCapturing,
+    onShare: () => { haptic("light"); setShareContext("slide"); setShareSheetOpen(true); },
+  };
+
+  const buildShareActions = (): ShareSheetAction[] => {
+    const ref = shareContext === "summary" ? summaryRef : currentSlideRef;
+    const filename = shareContext === "summary" ? summaryFilename : slideFilename;
+    const actions: ShareSheetAction[] = [
+      {
+        key: "save", icon: <Download className="size-6" />, label: "Save Image",
+        onClick: () => { setShareSheetOpen(false); captureAndShare(ref, filename, "download"); },
+      },
+      {
+        key: "system", icon: <Share2 className="size-6" />, label: "System Share",
+        disabled: typeof navigator === "undefined" || !navigator.share,
+        onClick: () => { setShareSheetOpen(false); captureAndShare(ref, filename, "share"); },
+      },
+    ];
+    if (shareContext === "summary") {
+      actions.push({
+        key: "compare", icon: <Link2 className="size-6" />, label: "Copy Compare Link",
+        onClick: () => { setShareSheetOpen(false); handleCopyCompareLink(); },
+      });
+    }
+    return actions;
+  };
+
+  // Numeric/short stats become a 2-column icon-tile grid on the summary card;
+  // named stats (merchants, people) collapse into a compact chip row below —
+  // keeps the card from reading as one long list of identical rows.
+  type SummaryTileData = { key: string; icon: React.ReactNode; label: string; value: string };
+  const summaryTiles: SummaryTileData[] = [];
+  if (enabledStats.totalSpent) summaryTiles.push({ key: "totalSpent", icon: <DollarSign className="size-4" />, label: "Total Spent", value: `$${stats.totalSpent.toFixed(2)}` });
+  if (enabledStats.transactions) summaryTiles.push({ key: "transactions", icon: <Calendar className="size-4" />, label: "Transactions", value: String(stats.totalTransactions) });
+  if (enabledStats.topCategory && categories.length > 0) summaryTiles.push({ key: "topCategory", icon: <ShoppingBag className="size-4" />, label: "Top Category", value: categories[0].name });
+  if (enabledStats.funEquivalent && funEquivalent) summaryTiles.push({ key: "funEquivalent", icon: <span className="flex size-4 items-center justify-center text-sm leading-none">{funEquivalent.emoji}</span>, label: "Fun Fact", value: `${funEquivalent.count} ${funEquivalent.label}` });
+  if (enabledStats.busiestDay && busiestDay) summaryTiles.push({ key: "busiestDay", icon: <CalendarClock className="size-4" />, label: "Busiest Day", value: busiestDay.name });
+
+  type SummaryChipData = { key: string; label: string; value: string };
+  const summaryChips: SummaryChipData[] = [];
+  if (enabledStats.biggestPurchase && stats.biggestPurchase) summaryChips.push({ key: "biggestPurchase", label: "Biggest Purchase", value: stats.biggestPurchase.merchant });
+  if (enabledStats.topMerchant && topMerchants.length > 0) summaryChips.push({ key: "topMerchant", label: "Top Merchant", value: topMerchants[0].name });
+  if (enabledStats.mostPaid) summaryChips.push({ key: "mostPaid", label: "Most Paid To", value: stats.mostPaidPerson.name });
+  if (enabledStats.biggestDebtor && splitBillStats?.biggestDebtor) summaryChips.push({ key: "biggestDebtor", label: "Biggest Debtor", value: splitBillStats.biggestDebtor.name });
+  if (enabledStats.slowestPayer && splitBillStats?.slowestPayer) summaryChips.push({ key: "slowestPayer", label: "Slowest Payer", value: splitBillStats.slowestPayer.name });
+  if (enabledStats.mostReminders && splitBillStats?.mostReminders) summaryChips.push({ key: "mostReminders", label: "Most Reminders", value: splitBillStats.mostReminders.name });
 
   return (
     <div className="flex flex-col bg-gradient-to-br from-white via-primary/5 to-secondary h-full">
       <div className="flex items-center gap-2 px-2 pt-2 shrink-0">
         <div className="flex-1"><StoryProgress total={slides.length} current={currentSlide} isPlaying={isPlaying} /></div>
-        <button onClick={() => navigate("/")} aria-label="Exit Wrapped"
+        <motion.button whileTap={{ scale: 0.94 }} onClick={() => navigate("/")} aria-label="Exit Wrapped"
           className="mr-2 flex items-center gap-1 rounded-full bg-black/5 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-black/10 transition-colors">
           <X className="size-3.5" /> Exit
-        </button>
+        </motion.button>
       </div>
-      <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto"
-        onClick={handleSlideAreaClickWithSwipeGuard} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div className="relative flex-1 flex items-center justify-center p-4 overflow-y-auto"
+        onClick={handleSlideAreaClickWithSwipeGuard} onDoubleClick={handleDoubleTapHeart} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+          <AnimatePresence>
+            {hearts.map((h) => (
+              <motion.div key={h.id} className="absolute" style={{ left: h.x, top: h.y, x: "-50%", y: "-50%" }}
+                initial={{ opacity: 0, scale: 0.3 }}
+                animate={{ opacity: [0, 1, 1, 0], scale: [0.3, 1.3, 1.1, 1], y: [0, -10, -30, -50] }}
+                transition={{ duration: 0.9, ease: "easeOut" }}
+                onAnimationComplete={() => setHearts((cur) => cur.filter((x) => x.id !== h.id))}
+              >
+                <Heart className="size-16 text-pink-400 fill-pink-400 drop-shadow-lg" />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
         <AnimatePresence mode="wait">
 
           {slides[currentSlide] === "intro" && (
@@ -518,6 +624,19 @@ export function WrappedPage() {
             </WrappedSlide>
           )}
 
+          {slides[currentSlide] === "fun-equivalence" && funEquivalent && (
+            <WrappedSlide key="fun-equivalence" gradient={G.teal} statKey="funEquivalent" {...slideProps}>
+              <motion.div animate={{ rotate: [0, -10, 10, 0] }} transition={{ duration: 2, repeat: Infinity }} className="text-6xl mb-4">
+                {funEquivalent.emoji}
+              </motion.div>
+              <p className="text-white/90 mb-3 text-lg">Your ${stats.totalSpent.toFixed(0)} could have been</p>
+              <motion.div initial={{ scale: 0 }} animate={{ scale: [0, 1.15, 1] }} transition={{ duration: 0.6, times: [0, 0.7, 1] }} className="text-6xl mb-2 font-black drop-shadow-lg">
+                <CountUp value={funEquivalent.count} decimals={0} />
+              </motion.div>
+              <p className="text-white/90 text-lg capitalize">{funEquivalent.label}</p>
+            </WrappedSlide>
+          )}
+
           {slides[currentSlide] === "transactions" && (
             <WrappedSlide key="transactions" gradient={G.purple} statKey="transactions" {...slideProps}>
               <Calendar className="size-14 mb-4 mx-auto" />
@@ -542,9 +661,19 @@ export function WrappedPage() {
           {slides[currentSlide] === "top-category" && categories.length > 0 && (
             <WrappedSlide key="top-category" gradient={G.orange} statKey="topCategory" {...slideProps}>
               <ShoppingBag className="size-16 mb-6 mx-auto" />
-              <p className="text-white/90 mb-4 text-lg">Your top spending category</p>
-              <motion.h2 initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }} className="text-5xl mb-4">{categories[0].name}</motion.h2>
-              <p className="text-white/90 text-lg">${categories[0].value.toFixed(2)} spent</p>
+              <p className="text-white/90 mb-4 text-lg">Your top spending categories</p>
+              <div className="space-y-2 text-left">
+                {categories.slice(0, 3).map((c, i) => (
+                  <motion.div key={c.name} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.15 }}
+                    className="flex items-center justify-between bg-white/15 rounded-xl px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{["🥇", "🥈", "🥉"][i]}</span>
+                      <span className="font-semibold">{c.name}</span>
+                    </div>
+                    <span className="font-bold">${c.value.toFixed(2)}</span>
+                  </motion.div>
+                ))}
+              </div>
             </WrappedSlide>
           )}
 
@@ -557,12 +686,31 @@ export function WrappedPage() {
             </WrappedSlide>
           )}
 
-          {slides[currentSlide] === "top-merchant" && (
+          {slides[currentSlide] === "top-merchant" && topMerchants.length > 0 && (
             <WrappedSlide key="top-merchant" gradient={G.teal} statKey="topMerchant" {...slideProps}>
               <Sparkles className="size-16 mb-6 mx-auto" />
-              <p className="text-white/90 mb-4 text-lg">You visited</p>
-              <motion.h2 initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }} className="text-4xl mb-4">{stats.topMerchant.name}</motion.h2>
-              <p className="text-white/90 text-lg">{stats.topMerchant.count} times in {monthName}</p>
+              <p className="text-white/90 mb-4 text-lg">You shopped here the most</p>
+              <div className="space-y-2 text-left">
+                {topMerchants.map((m, i) => (
+                  <motion.div key={m.name} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.15 }}
+                    className="flex items-center justify-between bg-white/15 rounded-xl px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{["🥇", "🥈", "🥉"][i]}</span>
+                      <span className="font-semibold">{m.name}</span>
+                    </div>
+                    <span className="font-bold">{m.count}x</span>
+                  </motion.div>
+                ))}
+              </div>
+            </WrappedSlide>
+          )}
+
+          {slides[currentSlide] === "busiest-day" && busiestDay && (
+            <WrappedSlide key="busiest-day" gradient={G.orange} statKey="busiestDay" {...slideProps}>
+              <CalendarClock className="size-16 mb-6 mx-auto" />
+              <p className="text-white/90 mb-4 text-lg">Your busiest spending day</p>
+              <motion.h2 initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }} className="text-5xl mb-4">{busiestDay.name}</motion.h2>
+              <p className="text-white/90 text-lg">${busiestDay.amount.toFixed(2)} across {busiestDay.count} transaction{busiestDay.count === 1 ? "" : "s"}</p>
             </WrappedSlide>
           )}
 
@@ -612,18 +760,42 @@ export function WrappedPage() {
                   <div className="inline-flex items-center justify-center size-10 rounded-full bg-white/20 mb-2 mx-auto"><Sparkles className="size-5 text-white" /></div>
                   <h2 className="text-xl mb-0.5 text-white">Your NETS Wrapped</h2>
                   <p className="text-white/60 mb-4 text-xs">{monthName} · {currentUser.name}</p>
-                  <div className="space-y-1.5 text-left">
-                    {enabledStats.personality && <SummaryRow label="Personality" value={personality.title} />}
-                    {enabledStats.totalSpent && <SummaryRow label="Total Spent" value={`$${stats.totalSpent.toFixed(2)}`} />}
-                    {enabledStats.transactions && <SummaryRow label="Transactions" value={String(stats.totalTransactions)} />}
-                    {enabledStats.topCategory && categories.length > 0 && <SummaryRow label="Top Category" value={categories[0].name} />}
-                    {enabledStats.biggestPurchase && stats.biggestPurchase && <SummaryRow label="Biggest Purchase" value={stats.biggestPurchase.merchant} />}
-                    {enabledStats.topMerchant && <SummaryRow label="Top Merchant" value={stats.topMerchant.name} />}
-                    {enabledStats.mostPaid && <SummaryRow label="Most Paid To" value={stats.mostPaidPerson.name} />}
-                    {splitBillStats?.biggestDebtor && enabledStats.biggestDebtor && <SummaryRow label="Biggest Debtor" value={splitBillStats.biggestDebtor.name} />}
-                    {splitBillStats?.slowestPayer && enabledStats.slowestPayer && <SummaryRow label="Slowest Payer" value={splitBillStats.slowestPayer.name} />}
-                    {splitBillStats?.mostReminders && enabledStats.mostReminders && <SummaryRow label="Most Reminders" value={splitBillStats.mostReminders.name} />}
-                  </div>
+
+                  {enabledStats.personality && (
+                    <div className="mb-4 flex flex-col items-center gap-1 rounded-2xl bg-white/10 py-4">
+                      <div className="flex items-center justify-center size-14 rounded-full bg-white/15">
+                        <Award className="size-7 text-amber-300" />
+                      </div>
+                      <p className="text-lg font-black text-white">{personality.title}</p>
+                      <p className="max-w-[220px] text-xs text-white/70">{personality.description}</p>
+                    </div>
+                  )}
+
+                  {summaryTiles.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2 text-left">
+                      {summaryTiles.map((t, i) => (
+                        <div key={t.key}
+                          className={`rounded-xl bg-white/12 p-3 ${summaryTiles.length % 2 === 1 && i === summaryTiles.length - 1 ? "col-span-2" : ""}`}>
+                          <div className="mb-1.5 flex items-center gap-1.5 text-white/60">
+                            {t.icon}
+                            <span className="text-[9px] font-semibold uppercase tracking-wide">{t.label}</span>
+                          </div>
+                          <p className="truncate text-sm font-bold text-white">{t.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {summaryChips.length > 0 && (
+                    <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                      {summaryChips.map((c) => (
+                        <span key={c.key} className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/85">
+                          <span className="text-white/55">{c.label}:</span> <span className="font-semibold">{c.value}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="mt-6 flex items-center justify-center gap-1.5">
                     <div className="h-px flex-1 bg-white/20" />
                     <span className="text-xs font-bold tracking-widest text-white/50">NETS</span>
@@ -654,26 +826,32 @@ export function WrappedPage() {
       <div className="shrink-0 p-4 space-y-3 border-t border-border bg-white">
         <div className="flex items-center justify-center gap-3">
           <span className="text-xs text-muted-foreground font-medium tabular-nums">{currentSlide + 1} / {slides.length}</span>
-          <button onClick={() => setIsPlaying((p) => !p)} className="size-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" aria-label={isPlaying ? "Pause" : "Play"}>
+          <motion.button whileTap={{ scale: 0.94 }} onClick={() => setIsPlaying((p) => !p)} className="size-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" aria-label={isPlaying ? "Pause" : "Play"}>
             {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
-          </button>
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.94 }}
+            onClick={() => { const next = !fxOn; setFxOn(next); setFxEnabled(next); }}
+            aria-label={fxOn ? "Mute sound & haptics" : "Unmute sound & haptics"}
+            className="size-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+            {fxOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+          </motion.button>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={prevSlide} disabled={currentSlide === 0} className="flex-1">Previous</Button>
-          <button onClick={nextSlide} disabled={currentSlide === slides.length - 1}
+          <motion.div whileTap={{ scale: 0.94 }} className="flex-1">
+            <Button variant="outline" onClick={prevSlide} disabled={currentSlide === 0} className="w-full">Previous</Button>
+          </motion.div>
+          <motion.button whileTap={{ scale: 0.94 }} onClick={nextSlide} disabled={currentSlide === slides.length - 1}
             className="flex-1 rounded-md px-4 py-2 text-white transition-opacity hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: "linear-gradient(to right, #0040ff, #0028a8)" }}>Next</button>
+            style={{ background: "linear-gradient(to right, #0040ff, #0028a8)" }}>Next</motion.button>
         </div>
       </div>
-    </div>
-  );
-}
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
-      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white/55">{label}</span>
-      <span className="text-right text-[13px] font-bold text-white">{value}</span>
+      <ShareSheet
+        open={shareSheetOpen}
+        onClose={() => setShareSheetOpen(false)}
+        actions={buildShareActions()}
+        title={shareContext === "summary" ? "Share your Wrapped" : "Share this slide"}
+      />
     </div>
   );
 }

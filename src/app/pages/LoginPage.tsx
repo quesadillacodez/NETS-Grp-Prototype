@@ -10,7 +10,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { NETSLogo } from '../components/NETSLogo';
-import { loginWithCredentials } from '../utils/authStorage';
+import { isSafeInternalPath, loginWithCredentials } from '../utils/authStorage';
 import {
   applyFailedLogin,
   EMPTY_LOGIN_SECURITY_STATE,
@@ -25,7 +25,9 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const reduceMotion = useReducedMotion();
-  const recoveredLoginId = (location.state as { loginId?: string } | null)?.loginId ?? '';
+  const incomingState = location.state as { loginId?: string; from?: string } | null;
+  const recoveredLoginId = incomingState?.loginId ?? '';
+  const redirectTarget = isSafeInternalPath(incomingState?.from) ? incomingState!.from : null;
   const [loginId, setLoginId] = useState(recoveredLoginId);
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
@@ -65,7 +67,7 @@ export function LoginPage() {
     if (user) {
       resetLoginSecurity();
       setSecurityState(EMPTY_LOGIN_SECURITY_STATE);
-      navigate(user.isAdmin ? '/admin' : '/', { replace: true });
+      navigate(user.isAdmin ? '/admin' : (redirectTarget ?? '/'), { replace: true });
       return;
     }
 
@@ -137,7 +139,7 @@ export function LoginPage() {
                   <label htmlFor="login-pin" className="text-xs font-bold uppercase tracking-wider text-slate-500">6-digit PIN</label>
                   <button
                     type="button"
-                    onClick={() => navigate('/recover-pin', { state: { loginId } })}
+                    onClick={() => navigate('/recover-pin', { state: { loginId, from: redirectTarget ?? undefined } })}
                     className="text-xs font-bold text-[#0053a0]"
                   >
                     Forgot PIN?

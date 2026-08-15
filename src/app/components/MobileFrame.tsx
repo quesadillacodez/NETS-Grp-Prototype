@@ -38,12 +38,14 @@ function AdminRedirectGuard() {
 // admin/user routing guard get a say, so the two can't fight over a redirect.
 function SessionGuard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [tick, setTick] = useState(0);
   useAppEvents(['sessionChanged', 'databaseReady'], () => setTick((t) => t + 1));
   void tick;
 
   if (!isLoggedIn()) {
-    queueMicrotask(() => navigate('/login', { replace: true }));
+    const from = `${location.pathname}${location.search}`;
+    queueMicrotask(() => navigate('/login', { replace: true, state: from === '/' ? undefined : { from } }));
     return null;
   }
   return <AdminRedirectGuard />;

@@ -107,6 +107,61 @@ export function getWrappedStats(year: number, month: number, txns: WrappedTxn[])
   };
 }
 
+// ─── Top merchants by visit count ─────────────────────────────────────────────
+export function getTopMerchants(year: number, month: number, txns: WrappedTxn[], limit = 3) {
+  const spending = filterByMonth(txns, year, month).filter((t) => t.amount < 0);
+  const counts: Record<string, number> = {};
+  const totals: Record<string, number> = {};
+  spending.forEach((t) => {
+    counts[t.merchant] = (counts[t.merchant] || 0) + 1;
+    totals[t.merchant] = (totals[t.merchant] || 0) + Math.abs(t.amount);
+  });
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count, total: parseFloat((totals[name] || 0).toFixed(2)) }));
+}
+
+// ─── Fun spending equivalence ─────────────────────────────────────────────────
+// Converts the month's total spend into a relatable Singapore-context count,
+// picking whichever item lands in a readable range instead of always using
+// the same one (nobody wants "0.3 movie tickets" or "8,000 kopis").
+const EQUIVALENTS = [
+  { emoji: '☕', label: 'kopis', price: 1.5 },
+  { emoji: '🧋', label: 'bubble teas', price: 5.5 },
+  { emoji: '🍜', label: 'hawker meals', price: 5 },
+  { emoji: '🎬', label: 'movie tickets', price: 14 },
+  { emoji: '🚗', label: 'Grab rides', price: 12 },
+] as const;
+
+export function getFunEquivalent(totalSpent: number) {
+  if (totalSpent <= 0) return null;
+  const inRange = EQUIVALENTS
+    .map((e) => ({ ...e, count: totalSpent / e.price }))
+    .filter((e) => e.count >= 3 && e.count <= 60);
+  const picked = inRange[0] ?? { ...EQUIVALENTS[0], count: totalSpent / EQUIVALENTS[0].price };
+  return { emoji: picked.emoji, label: picked.label, count: Math.round(picked.count) };
+}
+
+// ─── Busiest day of the week ──────────────────────────────────────────────────
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export function getBusiestDay(year: number, month: number, txns: WrappedTxn[]) {
+  const spending = filterByMonth(txns, year, month).filter((t) => t.amount < 0);
+  if (spending.length === 0) return null;
+  const byDay: Record<number, { amount: number; count: number }> = {};
+  spending.forEach((t) => {
+    const day = t.date.getDay();
+    if (!byDay[day]) byDay[day] = { amount: 0, count: 0 };
+    byDay[day].amount += Math.abs(t.amount);
+    byDay[day].count += 1;
+  });
+  const [dayIndex, stats] = Object.entries(byDay)
+    .map(([d, s]) => [Number(d), s] as const)
+    .sort((a, b) => b[1].amount - a[1].amount)[0];
+  return { name: DAY_NAMES[dayIndex], amount: parseFloat(stats.amount.toFixed(2)), count: stats.count };
+}
+
 export function getSpendingComparison(year: number, month: number, txns: WrappedTxn[]) {
   const cur = getWrappedStats(year, month, txns);
   const prevDate = new Date(year, month - 1, 1);

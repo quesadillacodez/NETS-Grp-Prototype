@@ -72,6 +72,8 @@ export function ScheduleReminderPage() {
           timestamp: new Date().toISOString(),
           read: false,
           reminderId: contactData.id,
+          channel: 'reminders',
+          link: '/reminders',
         });
       }
     }

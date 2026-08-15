@@ -5,7 +5,7 @@ import { BottomNav } from '../components/BottomNav';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { NotificationPopup } from '../components/NotificationPopup';
 import { useNavigate } from 'react-router';
-import { getAllTransactions } from '../utils/transactionStorage';
+import { describeTransaction, getAllTransactions } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
 import { getRemindersToReceive, getRemindersToPay } from '../utils/reminderStorage';
 import { useAppEvents } from '../utils/useAppEvents';
@@ -68,18 +68,20 @@ export function HomePage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate('/reminders')}
-              className="w-9 h-9 rounded-xl bg-secondary flex items-center justify-center hover:scale-105 transition-transform relative"
+              aria-label={hasReminders ? 'Reminders — you have pending bills' : 'Reminders'}
+              className="w-11 h-11 rounded-xl bg-secondary flex items-center justify-center hover:scale-105 transition-transform relative"
             >
-              <Bell className="w-4 h-4 text-foreground" />
+              <Bell className="w-4 h-4 text-foreground" aria-hidden="true" />
               {hasReminders && (
                 <div className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-white" />
               )}
             </button>
             <button
               onClick={() => navigate('/profile')}
-              className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center hover:scale-105 transition-transform"
+              aria-label={`Profile and settings for ${currentUser.name}`}
+              className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center hover:scale-105 transition-transform"
             >
-              <span className="text-base">{currentUser.avatar}</span>
+              <span className="text-base" aria-hidden="true">{currentUser.avatar}</span>
             </button>
           </div>
         </div>
@@ -188,30 +190,34 @@ export function HomePage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {transactions.slice(0, 5).map((tx, i) => (
-                <motion.div
-                  key={tx.id}
-                  initial={{ x: -10, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: i * 0.04 }}
-                  className="bg-white rounded-xl p-3 border border-gray-100 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${tx.amount > 0 ? 'bg-success' : 'bg-destructive'}`}>
-                      {tx.amount > 0
-                        ? <ArrowDownLeft className="w-4 h-4 text-white" />
-                        : <ArrowUpRight className="w-4 h-4 text-white" />}
+              {transactions.slice(0, 5).map((tx, i) => {
+                const described = describeTransaction(tx);
+                return (
+                  <motion.button
+                    key={tx.id}
+                    initial={{ x: -10, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: i * 0.04 }}
+                    onClick={() => navigate(`/transaction/${tx.id}`)}
+                    className="w-full text-left bg-white rounded-xl p-3 border border-gray-100 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${described.isIncoming ? 'bg-success' : 'bg-destructive'}`}>
+                        {described.isIncoming
+                          ? <ArrowDownLeft className="w-4 h-4 text-white" />
+                          : <ArrowUpRight className="w-4 h-4 text-white" />}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-foreground leading-tight">{tx.name}</p>
+                        <p className="text-xs text-muted-foreground">{described.meta.activity} · {tx.date}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-bold text-foreground leading-tight">{tx.name}</p>
-                      <p className="text-xs text-muted-foreground">{tx.date}</p>
-                    </div>
-                  </div>
-                  <p className={`text-sm font-black ${tx.amount > 0 ? 'text-success' : 'text-destructive'}`}>
-                    {tx.amount > 0 ? '+' : '-'}${Math.abs(tx.amount).toFixed(2)}
-                  </p>
-                </motion.div>
-              ))}
+                    <p className={`text-sm font-black ${described.isIncoming ? 'text-success' : 'text-destructive'}`}>
+                      {described.signedAmount}
+                    </p>
+                  </motion.button>
+                );
+              })}
             </div>
           )}
         </div>

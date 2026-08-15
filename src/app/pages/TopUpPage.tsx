@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { getAllTransactions, addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
+import { celebrate } from '../utils/motionPreference';
 
 const BASE_BALANCE = 2500.00;
 const PRESETS = [10, 20, 50, 100, 200, 500];
@@ -53,7 +54,7 @@ export function TopUpPage() {
     }, user.id);
     setBalance(current => current + value);
     setStep('done');
-    confetti({ particleCount: 90, spread: 70, origin: { y: 0.5 }, colors: ['#0040ff', '#00a94f', '#ffca28'] });
+    celebrate(confetti, { particleCount: 90, spread: 70, origin: { y: 0.5 }, colors: ['#0040ff', '#00a94f', '#ffca28'] });
   };
 
   if (step === 'done') {
@@ -65,7 +66,9 @@ export function TopUpPage() {
             <Check className="h-10 w-10 text-white" strokeWidth={3} />
           </motion.div>
           <h1 className="text-2xl font-black text-foreground">Top-up successful</h1>
-          <p className="mt-1 text-sm text-muted-foreground">${value.toFixed(2)} added from {source.label}</p>
+          <p role="status" aria-live="assertive" className="mt-1 text-sm text-muted-foreground">
+            ${value.toFixed(2)} added from {source.label}. New balance ${balance.toFixed(2)}.
+          </p>
 
           <div className="mt-6 w-full rounded-2xl border border-border bg-white p-5 shadow-lg">
             <p className="text-xs text-muted-foreground">New wallet balance</p>
@@ -98,9 +101,10 @@ export function TopUpPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => step === 'review' ? setStep('amount') : navigate('/')}
-            className="grid h-9 w-9 place-items-center rounded-full bg-white/20"
+            aria-label={step === 'review' ? 'Back to amount' : 'Back to home'}
+            className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-full bg-white/20"
           >
-            <ChevronLeft size={20} className="text-white" />
+            <ChevronLeft size={20} className="text-white" aria-hidden="true" />
           </button>
           <div>
             <p className="text-xs text-white/60">NETS vCashCard</p>
@@ -128,7 +132,9 @@ export function TopUpPage() {
                 className="min-w-0 flex-1 text-2xl font-black text-foreground outline-none"
               />
             </div>
-            <p className="mt-2 h-4 text-xs font-bold text-destructive">{error ?? ''}</p>
+            <p role="alert" aria-live="assertive" className="mt-2 h-4 text-xs font-bold text-destructive">
+              {error ?? ''}
+            </p>
 
             <div className="mt-2 grid grid-cols-3 gap-2">
               {PRESETS.map(preset => (

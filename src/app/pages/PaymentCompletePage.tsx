@@ -3,6 +3,7 @@ import { Check, Home, Bell, CheckCircle2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router';
 import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
+import { celebrate } from '../utils/motionPreference';
 
 export function PaymentCompletePage() {
   const navigate = useNavigate();
@@ -19,14 +20,18 @@ export function PaymentCompletePage() {
   );
 
   useEffect(() => {
-    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#1e2a4a', '#4f5d7a', '#10b981'] });
+    celebrate(confetti, { particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#1e2a4a', '#4f5d7a', '#047857'] });
   }, []);
 
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-success/10 to-white overflow-y-auto">
       <div className="flex flex-col items-center justify-start px-6 py-8 min-h-full">
+        <p role="status" aria-live="assertive" className="sr-only">
+          Payment sent. You paid ${amount.toFixed(2)} to {recipientName}. Authorization reference {displayRef}.
+        </p>
+
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', duration: 0.6 }} className="w-24 h-24 rounded-full bg-gradient-to-br from-success to-green-400 flex items-center justify-center mb-6 shadow-2xl">
-          <Check className="w-12 h-12 text-white" strokeWidth={3} />
+          <Check className="w-12 h-12 text-white" strokeWidth={3} aria-hidden="true" />
         </motion.div>
 
         <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="text-3xl font-bold text-foreground mb-3 text-center">

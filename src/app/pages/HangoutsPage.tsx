@@ -120,7 +120,7 @@ function ActivityDetail({ activity, saved, onSave, onPlan, onClose }: {
       <div className="relative h-52">
         <ImageWithFallback src={activity.image} alt={activity.title} className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-        <button onClick={onClose} className="absolute right-4 top-3 grid h-9 w-9 place-items-center rounded-full bg-black/35 text-white"><X size={18} /></button>
+        <button onClick={onClose} aria-label="Close activity details" className="absolute right-4 top-3 grid h-11 w-11 place-items-center rounded-full bg-black/35 text-white"><X size={18} aria-hidden="true" /></button>
         <div className="absolute bottom-4 left-5 right-5 text-white">
           <p className="text-xs font-bold text-white/75">{activity.venue}</p>
           <h2 className="mt-1 text-2xl font-black leading-tight">{activity.title}</h2>
@@ -165,7 +165,10 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
     const unique = [...new Set(initialIds)];
     return unique.length ? unique : activities.slice(0, 3).map(a => a.id);
   });
-  const [inviteIds, setInviteIds] = useState<string[]>(() => contacts.slice(0, 2).map(user => user.id));
+  // Nobody is preselected. Pre-ticking friends made it look like a choice had
+  // already been made, and tapping one of them silently removed them instead of
+  // adding them — the opposite of what the tap appeared to do.
+  const [inviteIds, setInviteIds] = useState<string[]>([]);
 
   const toggleActivity = (id: number) => {
     setActivityIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
@@ -185,7 +188,7 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
       <div className="px-5 pb-8">
         <div className="mb-5 flex items-start justify-between">
           <div><p className="text-xs font-black uppercase tracking-wider text-primary">New group plan</p><h2 className="text-2xl font-black text-foreground">Create a Hangout</h2></div>
-          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full bg-secondary"><X size={18} /></button>
+          <button onClick={onClose} aria-label="Close create Hangout" className="grid h-11 w-11 place-items-center rounded-full bg-secondary"><X size={18} aria-hidden="true" /></button>
         </div>
 
         <label className="mb-1 block text-xs font-black">Plan name</label>
@@ -210,7 +213,7 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
               const selected = activityIds.includes(activity.id);
               const overBudget = activity.pricePerPerson > Number(budget || 0);
               return (
-                <button key={activity.id} onClick={() => toggleActivity(activity.id)} className={`flex w-full items-center gap-3 rounded-xl border p-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                <button key={activity.id} onClick={() => toggleActivity(activity.id)} aria-pressed={selected} aria-label={`${selected ? 'Remove' : 'Add'} ${activity.title}`} className={`flex w-full items-center gap-3 rounded-xl border p-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border'}`}>
                   <ImageWithFallback src={activity.image} alt={activity.title} className="h-11 w-11 rounded-lg object-cover" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-black">{activity.title}</p>
@@ -225,15 +228,49 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
         </div>
 
         <div className="mb-5">
-          <p className="mb-2 text-xs font-black">Invite friends to vote</p>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-black">Invite friends to vote</p>
+            <span className={`text-[10px] font-bold ${inviteIds.length ? 'text-primary' : 'text-muted-foreground'}`}>
+              {inviteIds.length === 0
+                ? 'No friends selected'
+                : `${inviteIds.length} ${inviteIds.length === 1 ? 'friend' : 'friends'} selected`}
+            </span>
+          </div>
           <div className="flex flex-wrap gap-2">
             {contacts.map(contact => {
               const selected = inviteIds.includes(contact.id);
-              return <button key={contact.id} onClick={() => toggleInvite(contact.id)} className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold ${selected ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}><span>{contact.avatar}</span>{contact.name.split(' ')[0]}</button>;
+              return (
+                <button
+                  key={contact.id}
+                  onClick={() => toggleInvite(contact.id)}
+                  aria-pressed={selected}
+                  aria-label={`${selected ? 'Remove' : 'Invite'} ${contact.name}`}
+                  className={`flex min-h-11 items-center gap-1.5 rounded-full px-3 text-xs font-bold ${selected ? 'bg-primary text-white' : 'border border-border bg-secondary text-muted-foreground'}`}
+                >
+                  <span aria-hidden="true">{contact.avatar}</span>
+                  {contact.name.split(' ')[0]}
+                  <span className={`grid h-5 w-5 place-items-center rounded-full ${selected ? 'bg-white/25 text-white' : 'bg-white text-transparent'}`}>
+                    <Check size={11} aria-hidden="true" />
+                  </span>
+                </button>
+              );
             })}
           </div>
+          {inviteIds.length === 0 && (
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              Tap a friend to invite them. A Hangout needs at least one other person to vote.
+            </p>
+          )}
         </div>
 
+        {!canCreate && (
+          <p className="mb-2 text-center text-[11px] font-bold text-muted-foreground">
+            {name.trim().length <= 1 ? 'Give your plan a name to continue.'
+              : activityIds.length < 1 ? 'Choose at least one idea for the group to vote on.'
+              : inviteIds.length === 0 ? 'Invite at least one friend to vote.'
+              : (dateError ?? budgetError)}
+          </p>
+        )}
         <button
           disabled={!canCreate}
           onClick={() => onCreated(createHangout({ ownerUserId: ownerId, name, activityIds, invitedUserIds: inviteIds, preferredDate: date, budgetPerPerson: Number(budget) }))}
@@ -296,7 +333,7 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
       <div className="px-5 pb-8">
         <div className="mb-4 flex items-start justify-between">
           <div><p className="text-xs font-black uppercase tracking-wider text-primary">{plan.status === 'confirmed' ? 'Plan confirmed' : 'Voting is open'}</p><h2 className="text-2xl font-black">{plan.name}</h2></div>
-          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full bg-secondary"><X size={18} /></button>
+          <button onClick={onClose} aria-label="Close plan details" className="grid h-11 w-11 place-items-center rounded-full bg-secondary"><X size={18} aria-hidden="true" /></button>
         </div>
         <div className="mb-4 flex flex-wrap gap-2 text-[11px] font-bold text-muted-foreground">
           <span className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1.5"><CalendarDays size={12} />{new Date(`${plan.preferredDate}T00:00:00`).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}</span>
@@ -449,7 +486,7 @@ export function HangoutsPage() {
       <header className="bg-white px-4 pb-3 pt-8">
         <div className="flex items-center justify-between">
           <div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">Plan the experience before anyone pays.</p></div>
-          <button onClick={() => navigate('/profile')} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button>
+          <button onClick={() => navigate('/profile')} aria-label={`Profile and settings for ${currentUser.name}`} className="grid h-11 w-11 place-items-center rounded-xl bg-primary text-base"><span aria-hidden="true">{currentUser.avatar}</span></button>
         </div>
         <div className="mt-4 grid grid-cols-3 rounded-xl bg-secondary p-1">
           <button onClick={() => setTab('discover')} className={`rounded-lg py-2 text-xs font-black ${tab === 'discover' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Discover</button>
@@ -462,7 +499,7 @@ export function HangoutsPage() {
         <>
           <div className="border-b border-border bg-white px-4 pb-3">
             <div className="flex items-center gap-2 rounded-xl bg-secondary px-3 py-2.5"><Search size={16} className="text-muted-foreground" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Activity, venue or area" className="min-w-0 flex-1 bg-transparent text-xs outline-none" /></div>
-            <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+            <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
               {(Object.keys(CATEGORY_LABELS) as (ActivityCategory | 'all')[]).map(key => <button key={key} onClick={() => setCategory(key)} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold ${category === key ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>{CATEGORY_LABELS[key]}</button>)}
             </div>
           </div>
@@ -508,7 +545,7 @@ export function HangoutsPage() {
         </main>
       ) : (
         <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
-          <div className="mb-4 flex items-center justify-between"><div><p className="text-xs text-muted-foreground">Shared decisions, one plan</p><h1 className="text-xl font-black">Your group plans</h1></div><button onClick={() => startPlan(savedIds)} className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-white"><Users size={18} /></button></div>
+          <div className="mb-4 flex items-center justify-between"><div><p className="text-xs text-muted-foreground">Shared decisions, one plan</p><h1 className="text-xl font-black">Your group plans</h1></div><button onClick={() => startPlan(savedIds)} aria-label="Create a new Hangout plan" className="grid h-11 w-11 place-items-center rounded-xl bg-primary text-white"><Users size={18} aria-hidden="true" /></button></div>
           {plans.length === 0 ? (
             <div className="mt-14 text-center"><div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 text-primary"><Vote size={28} /></div><h2 className="mt-3 text-base font-black">No Hangouts yet</h2><p className="mx-auto mt-1 max-w-[260px] text-xs text-muted-foreground">Choose a few activity ideas, invite friends, and replace the endless group-chat debate with one vote.</p><button onClick={() => setTab('discover')} className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-xs font-black text-white">Discover activities</button></div>
           ) : (

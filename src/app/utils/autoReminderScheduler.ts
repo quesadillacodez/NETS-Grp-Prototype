@@ -64,6 +64,8 @@ function sendAutoReminder(): void {
     timestamp: new Date().toISOString(),
     read: false,
     reminderId: first.id,
+    channel: 'reminders',
+    link: '/reminders',
   });
 
   updateLastAutoReminderSent(user.id);

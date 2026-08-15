@@ -527,7 +527,7 @@ export function WrappedPage() {
   if (enabledStats.totalSpent) summaryTiles.push({ key: "totalSpent", icon: <DollarSign className="size-4" />, label: "Total Spent", value: `$${stats.totalSpent.toFixed(2)}` });
   if (enabledStats.transactions) summaryTiles.push({ key: "transactions", icon: <Calendar className="size-4" />, label: "Transactions", value: String(stats.totalTransactions) });
   if (enabledStats.topCategory && categories.length > 0) summaryTiles.push({ key: "topCategory", icon: <ShoppingBag className="size-4" />, label: "Top Category", value: categories[0].name });
-  if (enabledStats.funEquivalent && funEquivalent) summaryTiles.push({ key: "funEquivalent", icon: <span className="flex size-4 items-center justify-center text-sm leading-none">{funEquivalent.emoji}</span>, label: "Fun Fact", value: `${funEquivalent.count} ${funEquivalent.label}` });
+  if (enabledStats.funEquivalent && funEquivalent) summaryTiles.push({ key: "funEquivalent", icon: <span className="flex size-4 items-center justify-center text-sm leading-none">{funEquivalent.emoji}</span>, label: "Spent Enough For", value: `${funEquivalent.count} ${funEquivalent.label}` });
   if (enabledStats.busiestDay && busiestDay) summaryTiles.push({ key: "busiestDay", icon: <CalendarClock className="size-4" />, label: "Busiest Day", value: busiestDay.name });
 
   type SummaryChipData = { key: string; label: string; value: string };
@@ -756,18 +756,18 @@ export function WrappedPage() {
           {slides[currentSlide] === "summary" && (
             <motion.div key="summary" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="text-center max-w-md w-full my-auto">
               <Card className="border-0 shadow-2xl overflow-hidden">
-                <div ref={summaryRef} className="p-5 rounded-t-2xl" style={{ background: "linear-gradient(135deg, #0040ff 0%, #0028a8 100%)" }}>
+                <div ref={summaryRef} className="p-5 rounded-t-2xl" style={{ background: "linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%)" }}>
                   <div className="inline-flex items-center justify-center size-10 rounded-full bg-white/20 mb-2 mx-auto"><Sparkles className="size-5 text-white" /></div>
                   <h2 className="text-xl mb-0.5 text-white">Your NETS Wrapped</h2>
                   <p className="text-white/60 mb-4 text-xs">{monthName} · {currentUser.name}</p>
 
                   {enabledStats.personality && (
-                    <div className="mb-4 flex flex-col items-center gap-1 rounded-2xl bg-white/10 py-4">
-                      <div className="flex items-center justify-center size-14 rounded-full bg-white/15">
+                    <div className="mb-4 flex flex-col items-center gap-1 rounded-2xl bg-white/15 border border-white/10 py-4">
+                      <div className="flex items-center justify-center size-14 rounded-full bg-white/20">
                         <Award className="size-7 text-amber-300" />
                       </div>
                       <p className="text-lg font-black text-white">{personality.title}</p>
-                      <p className="max-w-[220px] text-xs text-white/70">{personality.description}</p>
+                      <p className="max-w-[220px] text-xs text-white/80">{personality.description}</p>
                     </div>
                   )}
 
@@ -775,8 +775,8 @@ export function WrappedPage() {
                     <div className="grid grid-cols-2 gap-2 text-left">
                       {summaryTiles.map((t, i) => (
                         <div key={t.key}
-                          className={`rounded-xl bg-white/12 p-3 ${summaryTiles.length % 2 === 1 && i === summaryTiles.length - 1 ? "col-span-2" : ""}`}>
-                          <div className="mb-1.5 flex items-center gap-1.5 text-white/60">
+                          className={`rounded-xl bg-white/15 border border-white/10 p-3 ${summaryTiles.length % 2 === 1 && i === summaryTiles.length - 1 ? "col-span-2" : ""}`}>
+                          <div className="mb-1.5 flex items-center gap-1.5 text-white/70">
                             {t.icon}
                             <span className="text-[9px] font-semibold uppercase tracking-wide">{t.label}</span>
                           </div>
@@ -789,8 +789,8 @@ export function WrappedPage() {
                   {summaryChips.length > 0 && (
                     <div className="mt-3 flex flex-wrap justify-center gap-1.5">
                       {summaryChips.map((c) => (
-                        <span key={c.key} className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/85">
-                          <span className="text-white/55">{c.label}:</span> <span className="font-semibold">{c.value}</span>
+                        <span key={c.key} className="rounded-full bg-white/15 border border-white/10 px-3 py-1 text-[11px] text-white/90">
+                          <span className="text-white/60">{c.label}:</span> <span className="font-semibold">{c.value}</span>
                         </span>
                       ))}
                     </div>

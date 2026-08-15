@@ -26,6 +26,73 @@ export interface RewardRedemption {
   refCode: string;
   redeemedAt: number;
   used: boolean;
+  /** Epoch ms the voucher lapses. 0 means it never expires (instant cashback). */
+  expiresAt: number;
+  usedAt?: number;
+}
+
+/**
+ * A voucher is in exactly one state at a time. `applied` is reserved for
+ * instant wallet cashback, which is credited immediately and has nothing left
+ * to redeem at a merchant.
+ */
+export type RedemptionStatus = 'applied' | 'used' | 'expired' | 'active';
+
+export function isCashbackRedemption(redemption: Pick<RewardRedemption, 'merchant' | 'title'>): boolean {
+  return redemption.merchant === 'NETS Wallet' && /cashback/i.test(redemption.title);
+}
+
+export function getRedemptionStatus(redemption: RewardRedemption, now = Date.now()): RedemptionStatus {
+  if (isCashbackRedemption(redemption)) return 'applied';
+  if (redemption.used) return 'used';
+  if (redemption.expiresAt > 0 && redemption.expiresAt < now) return 'expired';
+  return 'active';
+}
+
+export const REDEMPTION_STATUS_LABELS: Record<RedemptionStatus, string> = {
+  applied: 'Applied',
+  used: 'Used',
+  expired: 'Expired',
+  active: 'Active',
+};
+
+export function formatExpiry(expiresAt: number): string {
+  if (expiresAt <= 0) return 'No expiry';
+  return new Date(expiresAt).toLocaleDateString('en-SG', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
+
+export function daysUntilExpiry(expiresAt: number, now = Date.now()): number | null {
+  if (expiresAt <= 0) return null;
+  return Math.ceil((expiresAt - now) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Terms are derived from the reward itself rather than stored per row, so a
+ * voucher's conditions always match the validity and merchant it was issued
+ * against.
+ */
+export function getRewardTerms(reward: Pick<Reward, 'merchant' | 'validityDays' | 'category'>): string[] {
+  const terms = [
+    'One voucher code per redemption. A code cannot be reissued once it has been marked as used.',
+  ];
+
+  if (reward.validityDays > 0) {
+    terms.push(
+      `Valid for ${reward.validityDays} days from the date of redemption. Expired vouchers cannot be used and the XP spent is not refunded.`,
+      `Redeemable at participating ${reward.merchant} outlets that accept NETS payment.`,
+      'Cannot be exchanged for cash, and cannot be combined with other promotions or discounts.',
+    );
+  } else {
+    terms.push(
+      'Cashback is credited to your NETS wallet immediately and cannot be reversed once redeemed.',
+      'The credited amount forms part of your wallet balance and is subject to the wallet limit.',
+    );
+  }
+
+  terms.push('NETS may withdraw or amend this reward at any time without prior notice.');
+  return terms;
 }
 
 export interface XPHistoryEntry {
@@ -110,6 +177,8 @@ export function getRewardRedemptions(userId: string): RewardRedemption[] {
       refCode: String(row.ref_code),
       redeemedAt: Number(row.redeemed_at),
       used: Number(row.used) === 1,
+      expiresAt: Number(row.expires_at ?? 0),
+      usedAt: row.used_at == null ? undefined : Number(row.used_at),
     }));
 }
 
@@ -182,11 +251,13 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
   const now = Date.now();
   const refCode = `XP-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   const instantCashback = reward.merchant === 'NETS Wallet' && reward.category === 'Cashback';
+  const expiresAt = reward.validityDays > 0 ? now + reward.validityDays * 24 * 60 * 60 * 1000 : 0;
   run(
     `INSERT INTO reward_redemptions
-      (user_id, reward_id, title, merchant, xp_cost, ref_code, redeemed_at, used)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, reward.id, reward.title, reward.merchant, reward.xpCost, refCode, now, instantCashback ? 1 : 0],
+      (user_id, reward_id, title, merchant, xp_cost, ref_code, redeemed_at, used, expires_at, used_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, reward.id, reward.title, reward.merchant, reward.xpCost, refCode, now,
+      instantCashback ? 1 : 0, expiresAt, instantCashback ? now : null],
   );
   const redemption: RewardRedemption = {
     id: lastInsertId(),
@@ -198,6 +269,8 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
     refCode,
     redeemedAt: now,
     used: instantCashback,
+    expiresAt,
+    usedAt: instantCashback ? now : undefined,
   };
   if (instantCashback) {
     const match = reward.title.match(/\$(\d+(?:\.\d+)?)/);
@@ -207,7 +280,7 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
         `INSERT INTO transactions
           (user_id, name, amount, date, category, status, kind, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, 'NETS XP Cashback', amount, 'Just now', 'reward', 'received', 'cashback', now],
+        [userId, 'NETS XP Cashback', amount, 'Just now', 'reward', null, 'cashback', now],
       );
       window.dispatchEvent(new CustomEvent('transactionsUpdated'));
     }
@@ -216,9 +289,26 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
   return redemption;
 }
 
-export function markRewardUsed(redemptionId: number, userId: string): void {
-  run('UPDATE reward_redemptions SET used = 1 WHERE id = ? AND user_id = ?', [redemptionId, userId]);
+/**
+ * Mark a voucher as used at the merchant. An expired voucher is refused, so the
+ * status shown on the voucher and what the app allows can never disagree.
+ */
+export function markRewardUsed(redemptionId: number, userId: string): { ok: boolean; reason?: string } {
+  const redemption = getRewardRedemptions(userId).find(item => item.id === redemptionId);
+  if (!redemption) return { ok: false, reason: 'That voucher could not be found.' };
+
+  const status = getRedemptionStatus(redemption);
+  if (status === 'expired') {
+    return { ok: false, reason: `This voucher expired on ${formatExpiry(redemption.expiresAt)}.` };
+  }
+  if (status === 'used') return { ok: false, reason: 'This voucher has already been used.' };
+
+  run(
+    'UPDATE reward_redemptions SET used = 1, used_at = ? WHERE id = ? AND user_id = ?',
+    [Date.now(), redemptionId, userId],
+  );
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
+  return { ok: true };
 }
 
 export function getTier(lifetimeXP: number): {

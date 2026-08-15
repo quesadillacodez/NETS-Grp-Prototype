@@ -1,4 +1,5 @@
 import initSqlJs, { type Database, type SqlValue } from 'sql.js';
+import { classifyTransaction } from './transactionModel';
 
 const IDB_NAME = 'nets-db';
 const IDB_STORE = 'sqlite';
@@ -108,9 +109,35 @@ CREATE TABLE IF NOT EXISTS notifications (
   timestamp        TEXT NOT NULL,
   read             INTEGER DEFAULT 0,
   reminder_id      INTEGER,
+  channel          TEXT,
+  link             TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+
+-- Per-channel push preferences. A notification is always recorded in the
+-- Notification Centre; this only controls whether the user is interrupted.
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id      TEXT NOT NULL,
+  channel      TEXT NOT NULL,
+  push_enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at   INTEGER,
+  PRIMARY KEY (user_id, channel),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS payment_methods (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  label      TEXT NOT NULL,
+  detail     TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_payment_methods_user ON payment_methods(user_id);
 
 CREATE TABLE IF NOT EXISTS merchants (
   id         TEXT PRIMARY KEY,
@@ -238,6 +265,9 @@ CREATE TABLE IF NOT EXISTS reward_redemptions (
   ref_code    TEXT NOT NULL,
   redeemed_at INTEGER NOT NULL,
   used        INTEGER NOT NULL DEFAULT 0,
+  -- Epoch ms the voucher lapses; 0 means it never expires (instant cashback).
+  expires_at  INTEGER NOT NULL DEFAULT 0,
+  used_at     INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_reward_redemptions_user
@@ -343,6 +373,61 @@ export async function initDatabase(): Promise<void> {
       ON transactions(user_id, payment_id) WHERE payment_id IS NOT NULL`);
   } catch (e) {
     console.warn('transactions.created_at migration skipped:', e);
+  }
+
+  // Reward redemptions gained an expiry and a "used at" timestamp when voucher
+  // status was added. Existing vouchers get 30 days from their redemption date,
+  // matching the default validity of the catalogue they came from.
+  try {
+    const cols = db.exec('PRAGMA table_info(reward_redemptions)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('expires_at')) {
+      db.run('ALTER TABLE reward_redemptions ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0');
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      db.run(
+        `UPDATE reward_redemptions SET expires_at = redeemed_at + ?
+          WHERE expires_at = 0 AND NOT (merchant = 'NETS Wallet' AND title LIKE '%Cashback%')`,
+        [thirtyDays],
+      );
+    }
+    if (!names.includes('used_at')) {
+      db.run('ALTER TABLE reward_redemptions ADD COLUMN used_at INTEGER');
+    }
+  } catch (e) {
+    console.warn('reward_redemptions expiry migration skipped:', e);
+  }
+
+  // Notifications gained a channel (payments / reminders / rewards / hangouts)
+  // and a deep link when the Notification Centre was added. Existing rows are
+  // left NULL and classified on read by `inferNotificationChannel`.
+  try {
+    const cols = db.exec('PRAGMA table_info(notifications)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('channel')) db.run('ALTER TABLE notifications ADD COLUMN channel TEXT');
+    if (!names.includes('link')) db.run('ALTER TABLE notifications ADD COLUMN link TEXT');
+  } catch (e) {
+    console.warn('notifications channel migration skipped:', e);
+  }
+
+  // Normalise every transaction onto the canonical model. Databases created by
+  // earlier builds stored repayments as `transfer`, cashback under category
+  // `reward` and left `kind` NULL on seeded rows, which is why the same row
+  // could read as "Top-up" in one screen and "Paid you back" in another.
+  try {
+    const res = db.exec('SELECT id, name, amount, category, status, kind FROM transactions');
+    if (res.length) {
+      const columns = res[0].columns;
+      for (const values of res[0].values) {
+        const row: Record<string, SqlValue> = {};
+        columns.forEach((column, index) => { row[column] = values[index]; });
+        const type = classifyTransaction(row);
+        if (row.kind !== type) {
+          db.run('UPDATE transactions SET kind = ? WHERE id = ?', [type, row.id as SqlValue]);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('transaction kind normalisation skipped:', e);
   }
 
   try {
@@ -505,6 +590,8 @@ export function resetDatabase(): void {
   const d = requireDb();
   d.run(`
     DELETE FROM notifications;
+    DELETE FROM notification_preferences;
+    DELETE FROM payment_methods;
     DELETE FROM reminders;
     DELETE FROM transactions;
     DELETE FROM redemptions;

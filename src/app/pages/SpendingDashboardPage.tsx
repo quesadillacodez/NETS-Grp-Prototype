@@ -77,7 +77,7 @@ export function SpendingDashboardPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-3 py-2 bg-white border-b border-border flex-shrink-0 overflow-x-auto">
+      <div className="no-scrollbar flex gap-1 px-3 py-2 bg-white border-b border-border flex-shrink-0 overflow-x-auto">
         {(['overview', 'insights', 'goals', 'budgets'] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-3 py-1.5 rounded-full text-xs font-bold capitalize whitespace-nowrap transition-all ${tab === t ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>

@@ -6,6 +6,7 @@ import { NETSLogo } from '../components/NETSLogo';
 import { NotificationPopup } from '../components/NotificationPopup';
 import { getRemindersToReceive, getRemindersToPay, markReminderAsPaid, getAllReminders, getUserInsights } from '../utils/reminderStorage';
 import { addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
+import { categorizeMerchant } from '../utils/spendingInsights';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { toast } from 'sonner';
@@ -335,7 +336,7 @@ export function ReminderDashboardPage() {
     } else {
       const paid = markReminderAsPaid(reminder.id);
       if (paid) {
-        addTransaction({ name: paid.toUserName, amount: paid.amount, date: formatDateForTransaction(), category: paid.category, status: 'received', kind: 'transfer' }, currentUser.id);
+        addTransaction({ name: paid.toUserName, amount: paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'received', kind: 'repayment_received' }, currentUser.id);
         toast.success(`Payment received from ${paid.toUserName}`);
         setRemindersToReceive(getRemindersToReceive(currentUser.id));
         setRemindersToPay(getRemindersToPay(currentUser.id));

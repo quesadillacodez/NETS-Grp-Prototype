@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import type { ComponentType } from 'react';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router';
+import { MotionConfig } from 'motion/react';
 import { MobileFrame } from './components/MobileFrame';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -32,6 +33,14 @@ const SpendingDashboardPage = lazy(() => import('./pages/SpendingDashboardPage')
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const PinRecoveryPage = lazy(() => import('./pages/PinRecoveryPage').then(m => ({ default: m.PinRecoveryPage })));
 const TopUpPage = lazy(() => import('./pages/TopUpPage').then(m => ({ default: m.TopUpPage })));
+const TransactionDetailPage = lazy(() => import('./pages/TransactionDetailPage').then(m => ({ default: m.TransactionDetailPage })));
+const NotificationCentrePage = lazy(() => import('./pages/NotificationCentrePage').then(m => ({ default: m.NotificationCentrePage })));
+const NotificationPreferencesPage = lazy(() => import('./pages/NotificationPreferencesPage').then(m => ({ default: m.NotificationPreferencesPage })));
+const PersonalInformationPage = lazy(() => import('./pages/PersonalInformationPage').then(m => ({ default: m.PersonalInformationPage })));
+const PaymentMethodsPage = lazy(() => import('./pages/PaymentMethodsPage').then(m => ({ default: m.PaymentMethodsPage })));
+const SecurityPrivacyPage = lazy(() => import('./pages/SecurityPrivacyPage').then(m => ({ default: m.SecurityPrivacyPage })));
+const HelpSupportPage = lazy(() => import('./pages/HelpSupportPage').then(m => ({ default: m.HelpSupportPage })));
+const DemoControlsPage = lazy(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
 
 import './utils/autoReminderScheduler';
 
@@ -48,7 +57,15 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/reminder-tracking', Page: ReminderTrackingPage },
   { path: '/reminder-settings', Page: ReminderSettingsPage },
   { path: '/profile', Page: ProfilePage },
+  { path: '/profile/personal', Page: PersonalInformationPage },
+  { path: '/profile/payment-methods', Page: PaymentMethodsPage },
+  { path: '/profile/notification-preferences', Page: NotificationPreferencesPage },
+  { path: '/profile/security', Page: SecurityPrivacyPage },
+  { path: '/profile/help', Page: HelpSupportPage },
+  { path: '/profile/demo', Page: DemoControlsPage },
+  { path: '/notifications', Page: NotificationCentrePage },
   { path: '/all-transactions', Page: AllTransactionsPage },
+  { path: '/transaction/:id', Page: TransactionDetailPage },
   { path: '/payment-authorization', Page: PaymentAuthorizationPage },
   { path: '/payment-complete', Page: PaymentCompletePage },
   { path: '/custom-split', Page: CustomSplitPage },
@@ -113,5 +130,11 @@ const router = createBrowserRouter([
 ]);
 
 export default function App() {
-  return <RouterProvider router={router} />;
+  // `reducedMotion="user"` makes every Framer Motion animation in the app honour
+  // the operating system's reduce-motion setting, without each page opting in.
+  return (
+    <MotionConfig reducedMotion="user">
+      <RouterProvider router={router} />
+    </MotionConfig>
+  );
 }

@@ -123,8 +123,8 @@ export function ManageMerchantsPage() {
               <h3 className="text-sm font-bold text-foreground">
                 {editing ? 'Edit Merchant' : 'New Merchant'}
               </h3>
-              <button onClick={closeForm} className="text-muted-foreground">
-                <X className="w-5 h-5" />
+              <button onClick={closeForm} aria-label="Close merchant form" className="grid h-11 w-11 place-items-center text-muted-foreground">
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 

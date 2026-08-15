@@ -16,11 +16,15 @@
   --muted-foreground: #64748b;
   --accent: #0066FF;
   --accent-foreground: #ffffff;
-  --destructive: #ef4444;
+  /* Status colours are chosen to clear WCAG AA (4.5:1) both as text on white
+     and as a background behind white text. The lighter #ef4444 / #10b981 /
+     #f59e0b shades used previously measured 3.8:1, 2.5:1 and 2.2:1, which fail
+     in both directions. */
+  --destructive: #dc2626;        /* 4.83:1 on white */
   --destructive-foreground: #ffffff;
-  --success: #10b981;
+  --success: #047857;            /* 5.48:1 on white */
   --success-foreground: #ffffff;
-  --warning: #f59e0b;
+  --warning: #b45309;            /* 5.02:1 on white */
   --warning-foreground: #ffffff;
   --border: #e2e8f0;
   --input: transparent;

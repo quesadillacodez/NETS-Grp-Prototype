@@ -1,0 +1,48 @@
+/* ── Accessibility foundations ────────────────────────────────────────────────
+   Applied app-wide so individual screens don't each have to remember them. */
+
+/* Visible keyboard focus. Uses :focus-visible so a mouse press doesn't leave a
+   ring behind, while Tab always shows exactly where you are. */
+:where(a, button, input, select, textarea, summary, [role='switch'], [role='button'], [tabindex]):focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Some buttons sit on the dark blue headers, where the blue ring is hard to
+   see. Inside those, switch to a white ring. */
+.bg-gradient-to-b :where(a, button, [role='button']):focus-visible,
+[data-dark-surface] :where(a, button, [role='button']):focus-visible {
+  outline-color: #ffffff;
+}
+
+/* Respect the operating-system "reduce motion" setting. Framer Motion is
+   handled separately by MotionConfig in App.tsx; this covers CSS animations,
+   transitions and Tailwind's animate-* utilities. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Horizontal chip rows stay swipeable but no longer show a scrollbar track,
+   which on a 320px-wide phone ate into the row and looked broken. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Minimum comfortable touch target. Applied to controls that would otherwise
+   render smaller than the 44px recommended by WCAG 2.5.5. */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}

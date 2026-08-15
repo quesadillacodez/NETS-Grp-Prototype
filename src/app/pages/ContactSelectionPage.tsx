@@ -111,6 +111,20 @@ export function ContactSelectionPage() {
               </button>
             );
           })}
+
+          {filtered.length === 0 && (
+            <div className="mt-10 text-center">
+              <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-secondary text-muted-foreground">
+                <Search className="w-6 h-6" />
+              </div>
+              <h3 className="mt-3 text-sm font-semibold text-foreground">No results</h3>
+              <p className="mx-auto mt-1 max-w-[240px] text-xs text-muted-foreground">
+                {searchQuery.trim()
+                  ? `No contacts match "${searchQuery.trim()}". Try a different name or number.`
+                  : 'No contacts to show here yet.'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

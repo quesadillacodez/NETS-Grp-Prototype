@@ -8,6 +8,8 @@ export interface User {
   name: string;
   avatar: string;
   phone: string;
+  email?: string;
+  password?: string;
   isAdmin?: boolean;
   reminderFrequency?: ReminderFrequency;
   autoRemindersEnabled?: boolean;
@@ -19,11 +21,11 @@ export interface User {
 const CURRENT_USER_KEY = 'nets-current-user-id';
 
 const DEFAULT_USERS: User[] = [
-  { id: '1', name: 'Alex Chen', avatar: '👨‍💼', phone: '+65 9123 4567' },
-  { id: '2', name: 'Sarah Tan', avatar: '👩', phone: '+65 9234 5678' },
-  { id: '3', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789' },
-  { id: '4', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890' },
-  { id: 'admin', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true },
+  { id: '1', name: 'Alex Chen', avatar: '👨‍💼', phone: '+65 9123 4567', password: '111111' },
+  { id: '2', name: 'Sarah Tan', avatar: '👩', phone: '+65 9234 5678', password: '222222' },
+  { id: '3', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789', password: '333333' },
+  { id: '4', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890', password: '444444' },
+  { id: 'admin', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true, password: '888888' },
 ];
 
 function rowToUser(r: Record<string, any>): User {
@@ -32,6 +34,8 @@ function rowToUser(r: Record<string, any>): User {
     name: r.name,
     avatar: r.avatar,
     phone: r.phone,
+    email: r.email ?? undefined,
+    password: r.password ?? undefined,
     isAdmin: r.is_admin === 1,
     reminderFrequency: r.reminder_frequency ?? undefined,
     autoRemindersEnabled: r.auto_reminders_enabled == null ? undefined : r.auto_reminders_enabled === 1,
@@ -47,8 +51,8 @@ function seedDefaultUsersIfEmpty(): void {
 
   if (!hasUsers) {
     for (const u of DEFAULT_USERS) {
-      run('INSERT INTO users (id, name, avatar, phone, is_admin) VALUES (?, ?, ?, ?, ?)',
-        [u.id, u.name, u.avatar, u.phone, u.isAdmin ? 1 : 0]);
+      run('INSERT INTO users (id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null, u.isAdmin ? 1 : 0]);
     }
     return;
   }
@@ -57,8 +61,17 @@ function seedDefaultUsersIfEmpty(): void {
   const admin = queryOne('SELECT id FROM users WHERE id = ?', ['admin']);
   if (!admin) {
     const a = DEFAULT_USERS.find(u => u.id === 'admin')!;
-    run('INSERT INTO users (id, name, avatar, phone, is_admin) VALUES (?, ?, ?, ?, ?)',
-      [a.id, a.name, a.avatar, a.phone, 1]);
+    run('INSERT INTO users (id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [a.id, a.name, a.avatar, a.phone, a.email ?? null, a.password ?? null, 1]);
+  }
+
+  // Keep each default user's PIN in sync with the current defaults (so changing
+  // a PIN here updates existing databases too).
+  for (const u of DEFAULT_USERS) {
+    const row = queryOne('SELECT password FROM users WHERE id = ?', [u.id]);
+    if (row && u.password && row.password !== u.password) {
+      run('UPDATE users SET password = ? WHERE id = ?', [u.password, u.id]);
+    }
   }
 }
 
@@ -111,6 +124,30 @@ export function updateUserReminderSettings(
       settings.customReminderMinutes ?? null,
       userId,
     ]
+  );
+  syncReminderSettingsRow(userId);
+}
+
+// Refresh one user's row in the reminder_settings table from the users table.
+function syncReminderSettingsRow(userId: string): void {
+  run(
+    `INSERT OR REPLACE INTO reminder_settings
+       (user_id, reminder_frequency, auto_reminders_enabled, custom_reminder_hours, custom_reminder_minutes, updated_at)
+     SELECT id, reminder_frequency, auto_reminders_enabled, custom_reminder_hours, custom_reminder_minutes, ?
+       FROM users WHERE id = ?`,
+    [Date.now(), userId],
+  );
+}
+
+// Backfill the reminder_settings table for every user (used once at startup so
+// the table is populated even before anyone opens the settings screen).
+export function syncAllReminderSettings(): void {
+  run(
+    `INSERT OR REPLACE INTO reminder_settings
+       (user_id, reminder_frequency, auto_reminders_enabled, custom_reminder_hours, custom_reminder_minutes, updated_at)
+     SELECT id, reminder_frequency, auto_reminders_enabled, custom_reminder_hours, custom_reminder_minutes, ?
+       FROM users`,
+    [Date.now()],
   );
 }
 

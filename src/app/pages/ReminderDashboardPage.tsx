@@ -93,12 +93,15 @@ function ReminderCard({ reminder, tab, insights, onPay, onViewStatus }: {
             {reminder.scheduledDate && reminder.scheduledTime && tab === 'to-receive' && (
               <p className="text-xs text-orange-600 mt-0.5">📅 {reminder.scheduledDate} at {reminder.scheduledTime}</p>
             )}
-            {personInsight && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {personInsight.averageReminderCount}x avg
-                {personInsight.paidReminders > 0 && ` · ${personInsight.averagePaymentTime}d avg pay`}
-              </p>
-            )}
+            {personInsight && personInsight.paidReminders > 0 && tab === 'to-receive' && (() => {
+              const d = personInsight.averagePaymentTime;
+              const label = d < 1 ? 'Usually pays same day' : d < 1.5 ? 'Usually pays in ~1 day' : `Usually pays in ~${Math.round(d)} days`;
+              return (
+                <p className={`text-xs mt-0.5 font-medium ${d <= 2 ? 'text-success' : 'text-muted-foreground'}`}>
+                  🕐 {label}
+                </p>
+              );
+            })()}
           </div>
         </div>
         <div className="text-right">
@@ -109,6 +112,12 @@ function ReminderCard({ reminder, tab, insights, onPay, onViewStatus }: {
 
       {reminder.status !== 'paid' && (
         <div className="flex gap-2">{actionButtons()}</div>
+      )}
+
+      {reminder.status === 'paid' && reminder.thankYou && (
+        <div className="mt-2 bg-success/10 border border-success/20 rounded-xl px-3 py-2">
+          <p className="text-xs text-success font-medium">{reminder.thankYou}</p>
+        </div>
       )}
     </div>
   );

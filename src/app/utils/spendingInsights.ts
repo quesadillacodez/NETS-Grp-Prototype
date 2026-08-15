@@ -20,7 +20,7 @@ const CATEGORY_META: Record<SpendCategory, { color: string; emoji: string }> = {
 
 const KEYWORDS: [SpendCategory, string[]][] = [
   ['Groceries', ['fairprice', 'ntuc', 'giant', 'cold storage', 'sheng siong', 'grocery', 'supermarket']],
-  ['Food & Dining', ['starbucks', 'kopitiam', 'hawker', 'breadtalk', 'din tai fung', 'mcdonald', 'kfc', 'restaurant', 'cafe', 'coffee', 'food', 'bev eat', 'chan', 'bakery', 'eatery', 'toast']],
+  ['Food & Dining', ['starbucks', 'kopitiam', 'hawker', 'breadtalk', 'din tai fung', 'mcdonald', 'kfc', 'restaurant', 'cafe', 'coffee', 'food', 'bev eat', 'chan', 'bakery', 'eatery', 'toast', 'bubble tea', 'boba', 'milk tea', 'liho', 'gong cha', 'chagee']],
   ['Transport', ['grab', 'gojek', 'taxi', 'mrt', 'bus', 'transit', 'comfort', 'shell', 'esso', 'petrol', 'fuel', 'ez-link', 'ezlink']],
   ['Healthcare', ['guardian', 'pharmacy', 'clinic', 'hospital', 'watsons', 'unity', 'health', 'dental', 'cvs']],
   ['Entertainment', ['netflix', 'spotify', 'disney', 'cinema', 'gv', 'cathay', 'ktv', 'game', 'steam', 'movie']],

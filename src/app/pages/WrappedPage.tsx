@@ -606,13 +606,13 @@ export function WrappedPage() {
           )}
 
           {slides[currentSlide] === "summary" && (
-            <motion.div key="summary" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="text-center max-w-md w-full">
+            <motion.div key="summary" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="text-center max-w-md w-full my-auto">
               <Card className="border-0 shadow-2xl overflow-hidden">
-                <div ref={summaryRef} className="p-8 rounded-t-2xl" style={{ background: "linear-gradient(135deg, #0040ff 0%, #0028a8 100%)" }}>
-                  <div className="inline-flex items-center justify-center size-16 rounded-full bg-white/20 mb-4 mx-auto"><Sparkles className="size-8 text-white" /></div>
-                  <h2 className="text-3xl mb-1 text-white">Your NETS Wrapped</h2>
-                  <p className="text-white/60 mb-6 text-sm">{monthName} · {currentUser.name}</p>
-                  <div className="space-y-2 text-left">
+                <div ref={summaryRef} className="p-5 rounded-t-2xl" style={{ background: "linear-gradient(135deg, #0040ff 0%, #0028a8 100%)" }}>
+                  <div className="inline-flex items-center justify-center size-10 rounded-full bg-white/20 mb-2 mx-auto"><Sparkles className="size-5 text-white" /></div>
+                  <h2 className="text-xl mb-0.5 text-white">Your NETS Wrapped</h2>
+                  <p className="text-white/60 mb-4 text-xs">{monthName} · {currentUser.name}</p>
+                  <div className="space-y-1.5 text-left">
                     {enabledStats.personality && <SummaryRow label="Personality" value={personality.title} />}
                     {enabledStats.totalSpent && <SummaryRow label="Total Spent" value={`$${stats.totalSpent.toFixed(2)}`} />}
                     {enabledStats.transactions && <SummaryRow label="Transactions" value={String(stats.totalTransactions)} />}
@@ -630,7 +630,7 @@ export function WrappedPage() {
                     <div className="h-px flex-1 bg-white/20" />
                   </div>
                 </div>
-                <div className="px-8 pb-8 space-y-3 bg-white">
+                <div className="px-6 pb-6 pt-2 space-y-2.5 bg-white">
                   <Button onClick={handleShare} disabled={isCapturing} className="w-full bg-gradient-to-r from-[#0040ff] to-[#0028a8] hover:opacity-90 disabled:opacity-60 text-white">
                     {isCapturing
                       ? <><motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="size-4 mr-2 border-2 border-white border-t-transparent rounded-full" />Capturing...</>
@@ -671,9 +671,9 @@ export function WrappedPage() {
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-center px-4 py-3 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.15)" }}>
-      <span className="text-white/80 text-sm">{label}</span>
-      <span className="text-white font-semibold text-sm">{value}</span>
+    <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white/55">{label}</span>
+      <span className="text-right text-[13px] font-bold text-white">{value}</span>
     </div>
   );
 }

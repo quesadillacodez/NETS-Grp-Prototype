@@ -19,7 +19,13 @@ const DEFAULT_MERCHANTS: Merchant[] = [
   { id: 'bev-eat', name: 'BEV EAT PTE',    amount: 12.50, reference: 'Table 5', xpRate: 10, xpBonus: 1 },
   { id: 'grocer',  name: 'FairPrice',      amount: 23.90, xpRate: 10, xpBonus: 1 },
   { id: 'bubble',  name: 'Bubble Tea Bar', amount: 6.40,  reference: 'Brown sugar, less ice', xpRate: 10, xpBonus: 1 },
+  { id: 'uniqlo',  name: 'Uniqlo',         amount: 39.90, reference: 'AIRism Tee', xpRate: 10, xpBonus: 1 },
+  { id: 'zara',    name: 'ZARA',           amount: 79.90, reference: 'Order #ZR-2261', xpRate: 10, xpBonus: 1 },
 ];
+
+// IDs of the fashion (Shopping) merchants added after the first release. Used to
+// back-fill them into databases that were seeded before they existed.
+const FASHION_MERCHANT_IDS = ['uniqlo', 'zara'];
 
 function notifyUpdated(): void {
   window.dispatchEvent(new CustomEvent('merchantsUpdated'));
@@ -47,6 +53,22 @@ export function seedMerchantsIfEmpty(): void {
       [m.id, m.name, m.amount, m.reference ?? null, m.xpRate, m.xpBonus]
     );
   }
+  notifyUpdated();
+}
+
+// Back-fills the fashion merchants into databases that were seeded before they
+// were added. Runs at most once (guarded by an app_meta flag) so a merchant the
+// user later deletes does not reappear on the next launch.
+export function ensureFashionMerchants(): void {
+  const seen = query("SELECT value FROM app_meta WHERE key = 'seeded-fashion-merchants'");
+  if (seen.length > 0) return;
+  for (const m of DEFAULT_MERCHANTS.filter(x => FASHION_MERCHANT_IDS.includes(x.id))) {
+    run(
+      'INSERT OR IGNORE INTO merchants (id, name, amount, reference, active, xp_rate, xp_bonus) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      [m.id, m.name, m.amount, m.reference ?? null, m.xpRate, m.xpBonus]
+    );
+  }
+  run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('seeded-fashion-merchants', 'true')");
   notifyUpdated();
 }
 
@@ -83,7 +105,8 @@ export function saveMerchant(merchant: Merchant): void {
   notifyUpdated();
 }
 
-export function deactivateMerchant(id: string): void {
-  run('UPDATE merchants SET active = 0 WHERE id = ?', [id]);
+// Hard delete: the merchant row is removed from the database entirely.
+export function deleteMerchant(id: string): void {
+  run('DELETE FROM merchants WHERE id = ?', [id]);
   notifyUpdated();
 }

@@ -1,11 +1,10 @@
 import { useState } from 'react';
-import { ChevronRight, User, CreditCard, Bell, Lock, HelpCircle, Users, Trash2, Clock, Database, Shield, Sparkles, LogOut } from 'lucide-react';
+import { ChevronRight, User, CreditCard, Bell, Lock, HelpCircle, Users, Trash2, Clock, Shield, Sparkles, LogOut } from 'lucide-react';
 import { NETSLogo } from '../components/NETSLogo';
 import { BottomNav } from '../components/BottomNav';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { getCurrentUser, isAdminUser } from '../utils/userStorage';
 import { markUserClearedFresh, flushSave, resetDatabase } from '../utils/db';
-import { seedTestReminders } from '../utils/seedTestData';
 import { useAppEvents } from '../utils/useAppEvents';
 import { useNavigate } from 'react-router';
 import { logout } from '../utils/authStorage';
@@ -32,15 +31,6 @@ export function ProfilePage() {
     markUserClearedFresh();
     await flushSave();
     alert('✓ All data cleared! Everyone starts fresh — $2,500 balance, 0 transactions, 0 redemptions.');
-    window.location.reload();
-  };
-
-  const handleSeedTestData = () => {
-    const isAlex = currentUser.name === 'Alex Chen';
-    if (!isAlex) alert(`Note: Test data is created for Alex Chen's account.\n\nYou're currently: ${currentUser.name}\n\nSwitch to Alex Chen to see results.`);
-    if (!confirm('This will add test data. For best results, clear all data first. Continue?')) return;
-    seedTestReminders();
-    alert(`✓ Test data added!\n\n${isAlex ? 'You should now see:\n- Shared Bills: Hawker Haven ($156)\n- Insights: Sarah, Mike, Jenny' : 'Switch to Alex Chen to see the test data.'}`);
     window.location.reload();
   };
 
@@ -146,25 +136,6 @@ export function ProfilePage() {
               <ChevronRight className="w-5 h-5 text-violet-500" />
             </button>
           )}
-
-          <button onClick={() => setShowAccountSwitcher(true)} className="w-full flex items-center justify-between p-4 bg-primary/10 rounded-2xl mt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-                <Users className="w-6 h-6 text-white" />
-              </div>
-              <span className="font-semibold text-primary">Switch Account</span>
-            </div>
-            <ChevronRight className="w-5 h-5 text-primary" />
-          </button>
-
-          <button onClick={handleSeedTestData} className="w-full flex items-center justify-between p-4 bg-success/10 rounded-2xl mt-2">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-success flex items-center justify-center">
-                <Database className="w-6 h-6 text-white" />
-              </div>
-              <span className="font-semibold text-success">Add Test Data</span>
-            </div>
-          </button>
 
           <button onClick={handleClearData} className="w-full flex items-center justify-between p-4 bg-destructive/10 rounded-2xl mt-2">
             <div className="flex items-center gap-3">

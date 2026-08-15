@@ -76,7 +76,7 @@ export function HomePage() {
               )}
             </button>
             <button
-              onClick={() => setShowAccountSwitcher(true)}
+              onClick={() => navigate('/profile')}
               className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center hover:scale-105 transition-transform"
             >
               <span className="text-base">{currentUser.avatar}</span>

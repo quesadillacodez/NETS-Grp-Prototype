@@ -4,6 +4,7 @@ import {
   ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useNavigate } from 'react-router';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
@@ -152,6 +153,17 @@ function StoreView({ currentXP, onSelect }: { currentXP: number; onSelect: (rewa
         const locked = currentXP < reward.xpCost;
         return <button key={reward.id} onClick={() => onSelect(reward)} className="rounded-2xl border border-border bg-white p-3 text-left shadow-sm"><div className="mb-3 flex items-start justify-between"><div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-xs font-black text-primary">{reward.icon}</div>{locked && <LockKeyhole size={14} className="text-muted-foreground" />}</div><p className="text-[10px] font-bold text-muted-foreground">{reward.merchant}</p><h3 className="mt-0.5 min-h-8 text-xs font-black leading-tight">{reward.title}</h3><div className="mt-3 flex items-center justify-between"><span className="text-xs font-black text-primary">{reward.xpCost} XP</span><span className={`rounded-lg px-2 py-1 text-[9px] font-black ${locked ? 'bg-secondary text-muted-foreground' : 'bg-primary text-white'}`}>{locked ? 'View' : 'Redeem'}</span></div></button>;
       })}</div>
+      {filtered.length === 0 && (
+        <div className="mt-14 text-center">
+          <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-secondary text-muted-foreground"><Search size={28} /></div>
+          <h2 className="mt-3 text-base font-black">No results</h2>
+          <p className="mx-auto mt-1 max-w-[260px] text-xs text-muted-foreground">
+            {term
+              ? `Nothing matches "${search.trim()}". Try another keyword or category.`
+              : 'No rewards in this category right now — check back soon.'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -183,6 +195,7 @@ export function RewardsPage() {
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedVoucher, setSelectedVoucher] = useState<RewardRedemption | null>(null);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const navigate = useNavigate();
   const [, setVersion] = useState(0);
   const refresh = () => { setCurrentUser(getCurrentUser()); setVersion(version => version + 1); };
   useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus'], refresh);
@@ -204,7 +217,7 @@ export function RewardsPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       <header className="border-b border-border bg-white px-4 pb-3 pt-8">
-        <div className="flex items-center justify-between"><div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">NETS Rewards · earn and spend XP</p></div><button onClick={() => setShowAccountSwitcher(true)} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button></div>
+        <div className="flex items-center justify-between"><div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">NETS Rewards · earn and spend XP</p></div><button onClick={() => navigate('/profile')} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button></div>
         <div className="mt-4 flex gap-1 overflow-x-auto rounded-xl bg-secondary p-1">
           {([
             { key: 'overview', label: 'XP Home', icon: Award },

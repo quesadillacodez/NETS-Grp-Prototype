@@ -14,7 +14,7 @@ import {
   type SpendCategory,
 } from '../utils/spendingInsights';
 import {
-  getGoals, addGoal, contributeToGoal, seedGoalsIfEmpty,
+  getGoals, addGoal, contributeToGoal,
   getBudgets, setBudget, deleteBudget, type Goal,
 } from '../utils/goalStorage';
 
@@ -29,9 +29,6 @@ export function SpendingDashboardPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const now = new Date();
   const [tick, setTick] = useState(0);
-
-  // Seed a couple of starter goals so the Goals tab isn't empty.
-  seedGoalsIfEmpty(user.id);
 
   useAppEvents(['transactionsUpdated', 'goalsUpdated', 'budgetsUpdated', 'userSwitched', 'databaseReady', 'focus'], () => {
     setUser(getCurrentUser());

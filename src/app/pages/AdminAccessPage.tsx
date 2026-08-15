@@ -5,13 +5,14 @@ import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import {
   X, Shield, Users, TrendingUp, TrendingDown, DollarSign, UsersRound,
-  RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap,
+  RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap, LogOut,
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
+import { logout } from '../utils/authStorage';
 import { getAllTransactions, type Transaction } from '../utils/transactionStorage';
 import { getRedemptions } from '../utils/redemptionStorage';
 import {
-  getMerchants, saveMerchant, deactivateMerchant,
+  getMerchants, saveMerchant, deleteMerchant,
   DEFAULT_XP_BONUS, DEFAULT_XP_RATE, type Merchant,
 } from '../utils/merchantStorage';
 import {
@@ -362,7 +363,7 @@ export function AdminAccessPage() {
   };
 
   const handleDeleteActivity = (activity: Activity) => {
-    if (!confirm(`Delete "${activity.title}"?\n\nIt is removed from the Hangouts catalogue. Existing plans that already chose it are not affected.`)) return;
+    if (!confirm(`Delete "${activity.title}"?\n\nThis permanently removes it from the database and the Hangouts catalogue.`)) return;
     deleteActivity(activity.id);
     reload();
   };
@@ -399,7 +400,7 @@ export function AdminAccessPage() {
   };
   const removeMerchant = (m: Merchant) => {
     if (!confirm(`Remove "${m.name}"?\n\nIt will no longer be scannable on the pay screen.`)) return;
-    deactivateMerchant(m.id);
+    deleteMerchant(m.id);
     toast.success(`${m.name} removed`);
     setMerchants(getMerchants());
   };
@@ -411,9 +412,6 @@ export function AdminAccessPage() {
       <div className="bg-gradient-to-b from-[#1e2a4a] to-[#2d3f6a] px-5 pt-12 pb-4 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/profile')} className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
-              <ChevronLeft size={20} className="text-white" />
-            </button>
             <div className="flex items-center gap-2">
               <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
                 <Shield size={18} className="text-white" />
@@ -424,10 +422,10 @@ export function AdminAccessPage() {
               </div>
             </div>
           </div>
-          {/* Profile switcher */}
-          <button onClick={() => setShowAccountSwitcher(true)} className="flex items-center gap-2 bg-white/15 rounded-full pl-1 pr-3 py-1">
-            <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center text-base">{currentUser.avatar}</div>
-            <ChevronRight size={14} className="text-white/70" />
+          {/* Sign out */}
+          <button onClick={() => { logout(); navigate('/login', { replace: true }); }} className="flex items-center gap-2 bg-white/15 rounded-full px-3 py-1.5 text-white text-xs font-bold">
+            <LogOut size={14} className="text-white/80" />
+            Sign Out
           </button>
         </div>
       </div>

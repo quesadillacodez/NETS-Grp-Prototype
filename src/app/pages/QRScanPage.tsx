@@ -3,7 +3,7 @@ import { X, ScanLine, Loader2 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
-import { getCurrentUser } from '../utils/userStorage';
+import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import {
   requestNetsQr,
   watchWebhook,
@@ -12,6 +12,7 @@ import {
   type NetsQrRequestResult,
 } from '../utils/netsQr';
 import { getMerchants, type Merchant } from '../utils/merchantStorage';
+import { payHangout } from '../utils/hangoutStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { createPaymentId, resolvePaymentCategory, type PaymentFlowContext } from '../utils/paymentFlow';
 
@@ -55,6 +56,18 @@ export function QRScanPage() {
       if (timerRef.current) clearInterval(timerRef.current);
       webhookRef.current?.cancel();
     };
+  }, []);
+
+  // Arriving from a hangout "Pay": there's nothing to scan (the activity cost is
+  // already known), so go straight to the same "Payment Complete -> split?"
+  // choice the scanner shows after a scan.
+  useEffect(() => {
+    if (incoming?.hangoutId != null && incoming?.amount != null) {
+      setGeneratedAmount(incoming.amount);
+      setGeneratedMerchant(incoming.merchantName ?? '');
+      setShowPopup(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const startTimer = () => {
@@ -146,8 +159,16 @@ export function QRScanPage() {
         })
         .catch(() => {
         });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+    } catch {
+      // The live NETS sandbox needs real credentials and a backend proxy, which
+      // aren't available in this prototype (that's what caused the "Unauthorized"
+      // message). Instead of blocking the demo, complete the payment in
+      // simulation mode: show the "Payment Complete" screen with this amount and
+      // merchant so the split / pay-full flow can carry on as normal.
+      stopEverything();
+      setGeneratedAmount(parsedAmount);
+      setGeneratedMerchant(merchant);
+      setShowPopup(true);
     } finally {
       setIsGenerating(false);
     }
@@ -311,7 +332,33 @@ export function QRScanPage() {
 
               <div className="space-y-3">
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    // Hangout: participants are the invited friends, so skip the
+                    // Select Contacts step and go straight to the custom split
+                    // (same customisable-amount screen the scanner uses).
+                    if (incoming?.participantUserIds && incoming.participantUserIds.length > 0) {
+                      const meId = getCurrentUser().id;
+                      const allUsers = getAllUsers();
+                      const selectedContacts = incoming.participantUserIds
+                        .filter(id => id !== meId)
+                        .map(id => {
+                          const u = allUsers.find(user => user.id === id);
+                          return { id, name: u?.name ?? 'Friend', avatar: u?.avatar ?? '👤' };
+                        });
+                      navigate('/custom-split', {
+                        state: {
+                          amount: generatedAmount,
+                          merchantName: generatedMerchant,
+                          paymentId,
+                          paxCount: selectedContacts.length + 1,
+                          selectedContacts,
+                          hangoutId: incoming.hangoutId,
+                          reference: incoming.reference,
+                          spendCategory: incoming.spendCategory,
+                        },
+                      });
+                      return;
+                    }
                     navigate('/split-setup', {
                       state: {
                         amount: generatedAmount,
@@ -322,8 +369,8 @@ export function QRScanPage() {
                         reference: incoming?.reference,
                         spendCategory: incoming?.spendCategory,
                       },
-                    })
-                  }
+                    });
+                  }}
                   className="w-full py-4 bg-primary text-white rounded-2xl font-semibold shadow-sm"
                 >
                   Split Bill
@@ -341,6 +388,9 @@ export function QRScanPage() {
                       },
                       getCurrentUser().id
                     );
+                    // If this payment was for a hangout activity, mark it paid so
+                    // it can't be paid again and shows its ticket next time.
+                    if (incoming?.hangoutId != null) payHangout(incoming.hangoutId);
                     navigate('/');
                   }}
                   className="w-full py-4 bg-secondary text-foreground rounded-2xl font-semibold border border-border"

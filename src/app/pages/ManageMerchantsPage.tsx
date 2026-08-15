@@ -8,7 +8,7 @@ import { useAppEvents } from '../utils/useAppEvents';
 import {
   getMerchants,
   saveMerchant,
-  deactivateMerchant,
+  deleteMerchant,
   DEFAULT_XP_BONUS,
   DEFAULT_XP_RATE,
   type Merchant,
@@ -84,7 +84,7 @@ export function ManageMerchantsPage() {
   };
 
   const handleRemove = (merchant: Merchant) => {
-    deactivateMerchant(merchant.id);
+    deleteMerchant(merchant.id);
     toast.success(`${merchant.name} removed`);
   };
 

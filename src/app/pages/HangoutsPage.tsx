@@ -10,6 +10,7 @@ import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import {
+  canOwnerConfirm,
   confirmHangout,
   createHangout,
   getActivities,
@@ -20,6 +21,7 @@ import {
   getLeadingActivityIds,
   getParticipantIds,
   getSavedActivityIds,
+  getHangoutPaymentCode,
   hasEveryoneVoted,
   toggleSavedActivity,
   validateBudget,
@@ -29,8 +31,8 @@ import {
   type Hangout,
 } from '../utils/hangoutStorage';
 import { getAllUsers, getCurrentUser } from '../utils/userStorage';
-import { useAppEvents } from '../utils/useAppEvents';
 import { createPaymentId } from '../utils/paymentFlow';
+import { useAppEvents } from '../utils/useAppEvents';
 
 const CATEGORY_LABELS: Record<ActivityCategory | 'all', string> = {
   all: 'All ideas',
@@ -252,7 +254,6 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
   onPay: (plan: Hangout, activity: Activity) => void;
 }) {
   const votes = getHangoutVotes(plan.id);
-  const currentVote = votes.find(vote => vote.userId === currentUserId)?.activityId;
   const leaderId = getLeadingActivityId(plan, votes);
   const leaderIds = getLeadingActivityIds(plan, votes);
   const confirmed = plan.confirmedActivityId ? getActivity(plan.confirmedActivityId) : null;
@@ -260,13 +261,28 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
   const participantIds = getParticipantIds(plan);
   const everyoneVoted = hasEveryoneVoted(plan, votes);
   const pendingVoters = participantIds.length - votes.length;
-  const tieNeedsOwnerChoice = leaderIds.length > 1 && (!currentVote || !leaderIds.includes(currentVote));
-  const finalActivityId = leaderIds.length > 1 && currentVote && leaderIds.includes(currentVote) ? currentVote : leaderId;
-  const canFinalize = everyoneVoted && !tieNeedsOwnerChoice;
+  const noVotesYet = leaderIds.length === 0;
   const users = getAllUsers();
 
+  // Every selected participant (owner + everyone invited) can vote. On a single
+  // device you pick who is casting the vote here, so nobody who was invited is
+  // left out.
+  const [voterId, setVoterId] = useState(currentUserId);
+  const activeVoter = participantIds.includes(voterId) ? voterId : currentUserId;
+  const currentVote = votes.find(vote => vote.userId === activeVoter)?.activityId;
+
+  // Once the activity has been paid (via the scan flow), we show its ticket
+  // instead of the Pay button — a hangout can only be paid once.
+  const paymentCode = getHangoutPaymentCode(plan.id);
+
+  const ownerVote = votes.find(vote => vote.userId === plan.ownerUserId)?.activityId;
+  const tieNeedsOwnerChoice = leaderIds.length > 1 && (!ownerVote || !leaderIds.includes(ownerVote));
+  const finalActivityId = leaderIds.length > 1 && ownerVote && leaderIds.includes(ownerVote) ? ownerVote : leaderId;
+  // Owner can confirm early — everyone voting is not required.
+  const canFinalize = owner && canOwnerConfirm(plan, currentUserId, votes);
+
   const selectVote = (activityId: number) => {
-    voteForActivity(plan.id, currentUserId, activityId);
+    voteForActivity(plan.id, activeVoter, activityId);
     onRefresh();
   };
   const finalize = () => {
@@ -292,11 +308,43 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
           <div>
             <ImageWithFallback src={confirmed.image} alt={confirmed.title} className="h-44 w-full rounded-2xl object-cover" />
             <div className="py-4"><p className="text-xs font-black text-success">Top group choice</p><h3 className="text-xl font-black">{confirmed.title}</h3><p className="mt-1 text-sm text-muted-foreground">{confirmed.venue} - {confirmed.location}</p></div>
-            <div className="rounded-2xl bg-success/10 p-3 text-xs text-foreground">Everyone can see the same confirmed activity, date and budget. After the outing, continue to NETS Pay for bill splitting.</div>
-            <button onClick={() => onPay(plan, confirmed)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white">Pay and split after the outing <ArrowRight size={17} /></button>
+            <div className="rounded-2xl bg-success/10 p-3 text-xs text-foreground">Everyone can see the same confirmed activity, date and budget.</div>
+            {paymentCode ? (
+              <div className="mt-4 rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 text-center">
+                <p className="flex items-center justify-center gap-1.5 text-xs font-black text-success"><Check size={14} /> Paid — activity ticket</p>
+                <div className="mx-auto my-4 grid h-44 w-44 place-items-center rounded-3xl border-8 border-[#1e2a4a] bg-white p-3">
+                  <div className="grid grid-cols-7 gap-1">{Array.from({ length: 49 }).map((_, i) => <div key={i} className={`h-3 w-3 ${((i * 7 + plan.id * 3) % 5) < 2 ? 'bg-[#1e2a4a]' : 'bg-white'}`} />)}</div>
+                </div>
+                <p className="font-mono text-sm font-black tracking-wider text-primary">{paymentCode}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Show this ticket for {confirmed.title}. A hangout can only be paid once.</p>
+              </div>
+            ) : (
+              <button onClick={() => onPay(plan, confirmed)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white">Pay <ArrowRight size={17} /></button>
+            )}
           </div>
         ) : (
           <div>
+            <div className="mb-3 rounded-2xl bg-secondary p-2.5">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Voting as</p>
+              <div className="flex flex-wrap gap-1.5">
+                {participantIds.map(id => {
+                  const user = users.find(item => item.id === id);
+                  const isActive = id === activeVoter;
+                  const hasVoted = votes.some(vote => vote.userId === id);
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setVoterId(id)}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-bold ${isActive ? 'bg-primary text-white' : 'border border-border bg-white text-muted-foreground'}`}
+                    >
+                      <span>{user?.avatar ?? '?'}</span>
+                      {(user?.name ?? 'Friend').split(' ')[0]}{id === plan.ownerUserId ? ' (host)' : ''}
+                      {hasVoted && <Check size={11} className={isActive ? 'text-white' : 'text-success'} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <p className="mb-2 text-xs font-black">Vote for one activity</p>
             <div className="space-y-2">
               {plan.activityIds.map(activityId => {
@@ -323,16 +371,31 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
                 })}
               </div>
             </div>
-            {!everyoneVoted && (
-              <p className="mt-3 text-center text-[11px] font-bold text-muted-foreground">
-                Waiting on {pendingVoters} {pendingVoters === 1 ? 'person' : 'people'} — the plan locks in once everyone has voted.
-              </p>
-            )}
-            {owner && (
+            {owner ? (
               <>
-                {everyoneVoted && tieNeedsOwnerChoice && <p className="mt-3 text-center text-[11px] font-bold text-amber-700">Tie: vote for one of the leading choices to break it.</p>}
+                {noVotesYet && (
+                  <p className="mt-3 text-center text-[11px] font-bold text-muted-foreground">
+                    {"Once at least one person has voted you can confirm — you don't have to wait for everyone."}
+                  </p>
+                )}
+                {!noVotesYet && !everyoneVoted && (
+                  <p className="mt-3 text-center text-[11px] font-bold text-muted-foreground">
+                    {pendingVoters} {pendingVoters === 1 ? 'person has' : 'people have'} not voted yet, but you can confirm now or keep waiting.
+                  </p>
+                )}
+                {tieNeedsOwnerChoice && (
+                  <p className="mt-3 text-center text-[11px] font-bold text-amber-700">
+                    {"It's a tie — vote for one leading choice as the host to break it, then confirm."}
+                  </p>
+                )}
                 <button disabled={!canFinalize} onClick={finalize} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white disabled:opacity-40"><Check size={17} /> Confirm group choice</button>
               </>
+            ) : (
+              !everyoneVoted && (
+                <p className="mt-3 text-center text-[11px] font-bold text-muted-foreground">
+                  Waiting on {pendingVoters} {pendingVoters === 1 ? 'person' : 'people'} — the host can confirm the plan at any time.
+                </p>
+              )
             )}
           </div>
         )}
@@ -386,7 +449,7 @@ export function HangoutsPage() {
       <header className="bg-white px-4 pb-3 pt-8">
         <div className="flex items-center justify-between">
           <div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">Plan the experience before anyone pays.</p></div>
-          <button onClick={() => setShowAccountSwitcher(true)} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button>
+          <button onClick={() => navigate('/profile')} className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-base">{currentUser.avatar}</button>
         </div>
         <div className="mt-4 grid grid-cols-3 rounded-xl bg-secondary p-1">
           <button onClick={() => setTab('discover')} className={`rounded-lg py-2 text-xs font-black ${tab === 'discover' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Discover</button>
@@ -411,6 +474,17 @@ export function HangoutsPage() {
               </button>
             )}
             <div className="grid grid-cols-2 gap-3">{visibleActivities.map(activity => <ActivityCard key={activity.id} activity={activity} saved={savedIds.includes(activity.id)} onSave={save} onOpen={setSelected} />)}</div>
+            {visibleActivities.length === 0 && (
+              <div className="mt-14 text-center">
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-secondary text-muted-foreground"><Search size={28} /></div>
+                <h2 className="mt-3 text-base font-black">No results</h2>
+                <p className="mx-auto mt-1 max-w-[260px] text-xs text-muted-foreground">
+                  {search.trim()
+                    ? `Nothing matches "${search.trim()}". Try another search or category.`
+                    : 'No activities in this category right now — try another one.'}
+                </p>
+              </div>
+            )}
           </main>
         </>
       ) : tab === 'favourites' ? (
@@ -454,11 +528,11 @@ export function HangoutsPage() {
       <AnimatePresence>{selectedPlan && <PlanDetail plan={selectedPlan} currentUserId={currentUser.id} onClose={() => setSelectedPlanId(null)} onRefresh={refresh} onPay={(plan, activity) => navigate('/scan', { state: {
         paymentId: createPaymentId(),
         hangoutId: plan.id,
-        participantUserIds: plan.invitedUserIds,
+        participantUserIds: [plan.ownerUserId, ...plan.invitedUserIds],
         amount: activity.pricePerPerson * (plan.invitedUserIds.length + 1),
         merchantName: activity.venue,
         reference: `${plan.name} - ${activity.title}`,
-        spendCategory: 'Entertainment',
+        spendCategory: activity.category === 'food' ? 'Food & Dining' : 'Entertainment',
       } })} />}</AnimatePresence>
     </div>
   );

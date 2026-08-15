@@ -76,14 +76,6 @@ export function deleteBudget(budgetId: number): void {
   notifyBudgets();
 }
 
-// Seed a couple of starter goals for a user the first time they open the
-// dashboard, so it isn't empty. Only runs if they have none.
-export function seedGoalsIfEmpty(userId: string): void {
-  if (getGoals(userId).length > 0) return;
-  addGoal(userId, { name: 'Emergency Fund', target: 5000, current: 1200, icon: '🛡️', color: '#00a94f', deadline: 'Dec 2026' });
-  addGoal(userId, { name: 'Trip to Japan', target: 3000, current: 800, icon: '✈️', color: '#1565c0', deadline: 'Aug 2026' });
-}
-
 // Wipes all goals and budgets for every user. Used by "Clear All Data".
 export function clearAllGoalsAndBudgets(): void {
   run('DELETE FROM savings_goals');

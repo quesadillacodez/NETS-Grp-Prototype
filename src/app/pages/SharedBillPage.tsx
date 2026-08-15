@@ -149,7 +149,9 @@ export function SharedBillPage() {
                       {p.name === currentUser.name && <span className="px-1.5 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full">YOU</span>}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {p.isPayer ? 'Paid full bill' : `Share: $${p.amount.toFixed(2)}`}
+                      {p.isPayer
+                        ? `Paid full bill • Own share: $${p.amount.toFixed(2)}`
+                        : `Share: $${p.amount.toFixed(2)}`}
                     </p>
                   </div>
                 </div>

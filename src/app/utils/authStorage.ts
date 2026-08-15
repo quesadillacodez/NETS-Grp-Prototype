@@ -12,10 +12,24 @@ export function isLoggedIn(): boolean {
   return getAllUsers().some(user => user.id === id);
 }
 
-export function login(userId: string, passcode: string): boolean {
-  if (passcode !== DEMO_PASSCODE) return false;
-  const user = getAllUsers().find(item => item.id === userId);
-  if (!user) return false;
+// PIN-only sign-in: the PIN itself identifies the account. Each user has a
+// unique 6-digit PIN in the users table; entering it logs straight into that
+// account. Returns the matched user (so the caller can route), or null if no
+// account has that PIN.
+export function loginByPin(pin: string): User | null {
+  const user = getAllUsers().find(u => u.password && u.password === pin);
+  if (!user) return null;
+  localStorage.setItem(SESSION_KEY, user.id);
+  switchUser(user.id);
+  window.dispatchEvent(new CustomEvent('sessionChanged'));
+  return user;
+}
+
+// Each account has its own 6-digit PIN, stored in the users table. Login checks
+// the entered PIN against that user's stored PIN — no shared passcode.
+export function login(userId: string, pin: string): boolean {
+  const user = getAllUsers().find(u => u.id === userId);
+  if (!user || !user.password || pin !== user.password) return false;
   localStorage.setItem(SESSION_KEY, user.id);
   switchUser(user.id);
   window.dispatchEvent(new CustomEvent('sessionChanged'));

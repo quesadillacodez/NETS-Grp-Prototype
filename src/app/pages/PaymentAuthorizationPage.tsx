@@ -5,7 +5,7 @@ import { Check, Shield, CreditCard, X, Fingerprint } from 'lucide-react';
 import { markReminderAsPaid } from '../utils/reminderStorage';
 import { addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
-import { deleteNotificationByReminder } from '../utils/notificationStorage';
+import { deleteNotificationByReminder, addNotification } from '../utils/notificationStorage';
 import { createSimulatedAuthorization } from '../utils/securePayment';
 import { categorizeMerchant } from '../utils/spendingInsights';
 
@@ -34,7 +34,8 @@ export function PaymentAuthorizationPage() {
       setAuthStatus('approved');
 
       if (reminder) {
-        const paid = markReminderAsPaid(reminder.id);
+        const THANK_YOU = '🙏 Thanks for covering!';
+        const paid = markReminderAsPaid(reminder.id, THANK_YOU);
         if (paid) {
           deleteNotificationByReminder(reminder.id);
           // Settling a split bill is a real expense for the person paying it
@@ -43,6 +44,20 @@ export function PaymentAuthorizationPage() {
           // purchase because the payer already earned the XP at the merchant.
           addTransaction({ name: `${paid.category} (split with ${paid.fromUserName})`, amount: -paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'sent', kind: 'transfer' }, currentUser.id);
           addTransaction({ name: currentUser.name, amount: paid.amount, date: formatDateForTransaction(), category: paid.category, status: 'received', kind: 'transfer' }, paid.fromUserId);
+          // Notify the payer (who is owed the money) that this person paid them
+          // back, with the thank-you note — so they see it from their side.
+          addNotification({
+            userId: paid.fromUserId,
+            fromUserId: currentUser.id,
+            fromUserName: currentUser.name,
+            fromUserAvatar: currentUser.avatar,
+            message: `${currentUser.name} paid you back · ${THANK_YOU}`,
+            amount: paid.amount,
+            category: paid.category,
+            timestamp: new Date().toISOString(),
+            read: false,
+            reminderId: paid.id,
+          });
         }
       }
 

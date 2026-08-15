@@ -7,6 +7,7 @@ import { addTransaction, formatDateForTransaction, hasProcessedPayment, markPaym
 import { addReminders, getAllReminders } from '../utils/reminderStorage';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { addNotification } from '../utils/notificationStorage';
+import { payHangout } from '../utils/hangoutStorage';
 import { useRequiredState } from '../utils/useRequiredState';
 import { resolvePaymentCategory, type PaymentFlowContext, type SplitParticipant } from '../utils/paymentFlow';
 
@@ -83,6 +84,9 @@ export function PaymentSuccessPage() {
       });
     }
     markPaymentProcessed(paymentId);
+    // If this split was for a hangout activity, mark it paid (once) so the
+    // hangout shows its ticket and the Pay button never returns.
+    if (state?.hangoutId != null) payHangout(state.hangoutId);
   }, []);
 
   if (!state) return null;

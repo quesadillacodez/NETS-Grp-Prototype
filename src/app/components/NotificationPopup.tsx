@@ -33,6 +33,14 @@ export function NotificationPopup() {
 
   if (notifications.length === 0 || !isVisible) return null;
 
+  // A "paid you back" notification is a payment received, not a reminder request.
+  // Show the right label/heading so a payback isn't mislabelled as a reminder.
+  const isPayback = (n: Notification) => /paid you back/i.test(n.message || '');
+  const allPaybacks = notifications.every(isPayback);
+  const heading = allPaybacks
+    ? `${notifications.length} New ${notifications.length === 1 ? 'Notification' : 'Notifications'}`
+    : `${notifications.length} New ${notifications.length === 1 ? 'Reminder' : 'Reminders'}`;
+
   return (
     <AnimatePresence>
       <motion.div
@@ -48,7 +56,7 @@ export function NotificationPopup() {
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-white text-sm mb-1">
-                {notifications.length} New {notifications.length === 1 ? 'Reminder' : 'Reminders'}
+                {heading}
               </h3>
               {notifications.slice(0, 2).map((notif) => (
                 <div key={notif.id} className="mb-1 last:mb-0">
@@ -77,7 +85,7 @@ export function NotificationPopup() {
             onClick={viewReminders}
             className="w-full mt-2 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-white font-semibold text-xs transition-colors"
           >
-            View All Reminders
+            {allPaybacks ? 'View All' : 'View All Reminders'}
           </button>
         </div>
       </motion.div>

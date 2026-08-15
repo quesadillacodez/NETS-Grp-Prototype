@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS users (
   name                      TEXT NOT NULL,
   avatar                    TEXT NOT NULL,
   phone                     TEXT NOT NULL,
+  email                     TEXT,
+  password                  TEXT,
   is_admin                  INTEGER DEFAULT 0,
   reminder_frequency        TEXT DEFAULT 'daily',
   auto_reminders_enabled    INTEGER DEFAULT 1,
@@ -86,6 +88,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   reminder_count     INTEGER DEFAULT 0,
   created_date       TEXT,
   paid_date          TEXT,
+  thank_you          TEXT,
   FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (to_user_id)   REFERENCES users(id) ON DELETE CASCADE
 );
@@ -243,6 +246,38 @@ CREATE TABLE IF NOT EXISTS processed_payments (
   payment_id   TEXT PRIMARY KEY,
   processed_at INTEGER NOT NULL
 );
+
+-- A per-user view of the Reminder Settings screen. Mirrors the settings columns
+-- on the users table so they're easy to see as their own table. Kept in sync:
+-- written on save and backfilled at startup.
+CREATE TABLE IF NOT EXISTS reminder_settings (
+  user_id                 TEXT PRIMARY KEY,
+  reminder_frequency      TEXT,
+  auto_reminders_enabled  INTEGER,
+  custom_reminder_hours   INTEGER,
+  custom_reminder_minutes INTEGER,
+  updated_at              INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- A materialised copy of the Insights screen (who owes whom, how reliably they
+-- pay). Recomputed from the reminders table whenever Insights is viewed, so it
+-- always reflects the current data rather than being hard-coded.
+CREATE TABLE IF NOT EXISTS insights (
+  owner_user_id          TEXT NOT NULL,
+  person_user_id         TEXT NOT NULL,
+  person_name            TEXT,
+  avatar                 TEXT,
+  total_reminders        INTEGER,
+  paid_reminders         INTEGER,
+  pending_reminders      INTEGER,
+  average_reminder_count REAL,
+  average_payment_time   REAL,
+  fastest_payment        REAL,
+  slowest_payment        REAL,
+  updated_at             INTEGER,
+  PRIMARY KEY (owner_user_id, person_user_id)
+);
 `;
 
 export async function initDatabase(): Promise<void> {
@@ -321,6 +356,29 @@ export async function initDatabase(): Promise<void> {
   } catch (e) {
     console.warn('merchants XP migration skipped:', e);
   }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(reminders)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('thank_you')) {
+      db.run('ALTER TABLE reminders ADD COLUMN thank_you TEXT');
+    }
+  } catch (e) {
+    console.warn('reminders.thank_you migration skipped:', e);
+  }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(users)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('password')) {
+      db.run('ALTER TABLE users ADD COLUMN password TEXT');
+    }
+    if (!names.includes('email')) {
+      db.run('ALTER TABLE users ADD COLUMN email TEXT');
+    }
+  } catch (e) {
+    console.warn('users.password/email migration skipped:', e);
+  }
 }
 
 function scheduleSave(): void {
@@ -328,6 +386,7 @@ function scheduleSave(): void {
   saveTimer = setTimeout(() => {
     if (!db) return;
     saveBytes(db.export()).catch(err => console.error('DB save failed:', err));
+    void syncDatabaseToDisk();
   }, 150);
 }
 
@@ -338,6 +397,7 @@ export async function flushSave(): Promise<void> {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   if (!db) return;
   await saveBytes(db.export());
+  void syncDatabaseToDisk();
 }
 
 function requireDb(): Database {
@@ -377,6 +437,62 @@ export function run(sql: string, params: SqlValue[] = []): void {
 export function lastInsertId(): number {
   const row = queryOne('SELECT last_insert_rowid() AS id');
   return row ? Number(row.id) : 0;
+}
+
+// ── Live sync: mirror the real database to files on disk while `npm run dev` ──
+// runs (handled by the dev-server endpoint in vite.config.ts). Nothing here is
+// hard-coded: it exports whatever the app actually has right now, so anything
+// added/edited/deleted in the app is reflected in database/nets.sqlite (and the
+// readable per-table files). No-op outside dev or if the endpoint is absent.
+
+export function listTables(): string[] {
+  return query(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+     ORDER BY name`,
+  ).map(row => String(row.name));
+}
+
+function tableColumnNames(table: string): string[] {
+  if (!listTables().includes(table)) return [];
+  return query(`PRAGMA table_info(${table})`).map(row => String(row.name));
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+let diskSyncInFlight = false;
+async function syncDatabaseToDisk(): Promise<void> {
+  const isDev = typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV;
+  if (!isDev || !db || typeof fetch === 'undefined' || diskSyncInFlight) return;
+  diskSyncInFlight = true;
+  try {
+    const snapshot = listTables().map(name => {
+      const columns = tableColumnNames(name);
+      const rows = query(`SELECT * FROM ${name}`).map(row => columns.map(col => row[col] ?? null));
+      return { name, columns, rows };
+    });
+    await fetch('/__db/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sqlite: bytesToBase64(db.export()), snapshot }),
+    });
+  } catch {
+    // dev convenience only — ignore (endpoint absent, offline, production build)
+  } finally {
+    diskSyncInFlight = false;
+  }
+}
+
+// Force an immediate write of the on-disk files (e.g. right after seeding).
+export function syncDatabaseFilesNow(): void {
+  void syncDatabaseToDisk();
 }
 
 export function resetDatabase(): void {

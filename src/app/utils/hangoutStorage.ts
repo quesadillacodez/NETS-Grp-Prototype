@@ -216,10 +216,12 @@ export function updateActivity(activity: Activity): void {
   notifyActivities();
 }
 
-// Soft delete: hangouts already created may still reference this activity, so the
-// row stays readable by getActivity() while disappearing from the catalogue.
+// Hard delete: the activity row is removed from the database entirely, along
+// with any saved-activity (favourite) and vote rows that referenced it.
 export function deleteActivity(activityId: number): void {
-  run('UPDATE activities SET active = 0 WHERE id = ?', [activityId]);
+  run('DELETE FROM activities WHERE id = ?', [activityId]);
+  run('DELETE FROM saved_activities WHERE activity_id = ?', [activityId]);
+  run('DELETE FROM hangout_votes WHERE activity_id = ?', [activityId]);
   notifyActivities();
 }
 
@@ -375,6 +377,43 @@ export function getParticipantIds(hangout: Hangout): string[] {
   return [hangout.ownerUserId, ...hangout.invitedUserIds];
 }
 
+// ── One-time payment per hangout ─────────────────────────────────────────────
+// A confirmed hangout can be paid once. Paying generates a code the group saves
+// and uses; the code is stored (in app_meta) so it survives reloads and so a
+// second payment is impossible — paying again just returns the same code.
+
+function paymentCodeKey(hangoutId: number): string {
+  return `hangout-payment-code:${hangoutId}`;
+}
+
+function makePaymentCode(): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no easily-confused characters
+  let body = '';
+  for (let i = 0; i < 8; i++) body += chars[Math.floor(Math.random() * chars.length)];
+  return `NETS-${body.slice(0, 4)}-${body.slice(4)}`;
+}
+
+// The saved payment code for a hangout, or null if it hasn't been paid yet.
+export function getHangoutPaymentCode(hangoutId: number): string | null {
+  const row = queryOne('SELECT value FROM app_meta WHERE key = ?', [paymentCodeKey(hangoutId)]);
+  return row ? String(row.value) : null;
+}
+
+export function isHangoutPaid(hangoutId: number): boolean {
+  return getHangoutPaymentCode(hangoutId) !== null;
+}
+
+// Pays the hangout once and returns the code. If it was already paid, the
+// existing code is returned unchanged (no second payment is created).
+export function payHangout(hangoutId: number): string {
+  const existing = getHangoutPaymentCode(hangoutId);
+  if (existing) return existing;
+  const code = makePaymentCode();
+  run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', [paymentCodeKey(hangoutId), code]);
+  notifyHangouts();
+  return code;
+}
+
 // Everyone invited must have voted before a plan can be locked in, so nobody
 // loses their say to whoever votes first.
 export function hasEveryoneVoted(hangout: Hangout, votes = getHangoutVotes(hangout.id)): boolean {
@@ -382,13 +421,32 @@ export function hasEveryoneVoted(hangout: Hangout, votes = getHangoutVotes(hango
   return getParticipantIds(hangout).every(id => voted.has(id));
 }
 
+// Whether the hangout's creator may lock the plan in right now. Not everyone has
+// to vote first — the owner can confirm as soon as at least one vote is in and
+// there is a single clear leader (or they've broken a tie by voting for one of
+// the leading options themselves).
+export function canOwnerConfirm(
+  hangout: Hangout,
+  ownerUserId: string,
+  votes = getHangoutVotes(hangout.id),
+): boolean {
+  if (hangout.status !== 'voting' || hangout.ownerUserId !== ownerUserId) return false;
+  const leaders = getLeadingActivityIds(hangout, votes);
+  if (leaders.length === 0) return false;   // nobody has voted yet
+  if (leaders.length === 1) return true;    // one clear winner
+  // Tie: the owner must have voted for one of the leaders to break it.
+  const ownerVote = votes.find(vote => vote.userId === ownerUserId)?.activityId;
+  return ownerVote != null && leaders.includes(ownerVote);
+}
+
 export function confirmHangout(hangoutId: number, ownerUserId: string, activityId: number): void {
   const hangout = getHangout(hangoutId);
   if (!hangout) return;
   const votes = getHangoutVotes(hangoutId);
   const leaders = getLeadingActivityIds(hangout, votes);
-  if (hangout.status !== 'voting' || hangout.ownerUserId !== ownerUserId
-      || !hasEveryoneVoted(hangout, votes) || !leaders.includes(activityId)) return;
+  // Owner can finalise without waiting for everyone, but the chosen activity must
+  // be one of the current leaders so the group's votes are still respected.
+  if (!canOwnerConfirm(hangout, ownerUserId, votes) || !leaders.includes(activityId)) return;
   run(
     "UPDATE hangouts SET status = 'confirmed', confirmed_activity_id = ? WHERE id = ?",
     [activityId, hangoutId],

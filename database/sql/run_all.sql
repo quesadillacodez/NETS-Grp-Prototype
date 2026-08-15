@@ -7,9 +7,12 @@ PRAGMA foreign_keys = OFF;
 -- ---------- users ----------
 CREATE TABLE IF NOT EXISTS users (
   id                        TEXT PRIMARY KEY,
+  login_id                  TEXT UNIQUE,
   name                      TEXT NOT NULL,
   avatar                    TEXT NOT NULL,
   phone                     TEXT NOT NULL,
+  email                     TEXT,
+  password                  TEXT,
   is_admin                  INTEGER DEFAULT 0,
   reminder_frequency        TEXT DEFAULT 'daily',
   auto_reminders_enabled    INTEGER DEFAULT 1,

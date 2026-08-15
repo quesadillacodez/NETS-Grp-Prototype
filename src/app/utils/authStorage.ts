@@ -2,38 +2,43 @@ import { getAllUsers, switchUser, type User } from './userStorage';
 
 const SESSION_KEY = 'nets-session-user-id';
 
-// Prototype accounts all share one passcode — there is no real credential store
-// behind this screen, and the login exists to demo the entry flow.
-export const DEMO_PASSCODE = '1234';
-
 export function isLoggedIn(): boolean {
   const id = localStorage.getItem(SESSION_KEY);
   if (!id) return false;
   return getAllUsers().some(user => user.id === id);
 }
 
-// PIN-only sign-in: the PIN itself identifies the account. Each user has a
-// unique 6-digit PIN in the users table; entering it logs straight into that
-// account. Returns the matched user (so the caller can route), or null if no
-// account has that PIN.
-export function loginByPin(pin: string): User | null {
-  const user = getAllUsers().find(u => u.password && u.password === pin);
-  if (!user) return null;
+
+function normalizeLoginId(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function normalizePhone(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+export function findUserByLoginId(loginId: string): User | null {
+  const normalizedLoginId = normalizeLoginId(loginId);
+  return getAllUsers().find(u =>
+    u.loginId && normalizeLoginId(u.loginId) === normalizedLoginId,
+  ) ?? null;
+}
+
+// Customer-facing sign-in uses a memorable login ID while the rest of the app
+// continues to use stable internal IDs for database relationships.
+export function loginWithCredentials(loginId: string, pin: string): User | null {
+  const user = findUserByLoginId(loginId);
+  if (!user || !user.password || pin !== user.password) return null;
   localStorage.setItem(SESSION_KEY, user.id);
   switchUser(user.id);
   window.dispatchEvent(new CustomEvent('sessionChanged'));
   return user;
 }
 
-// Each account has its own 6-digit PIN, stored in the users table. Login checks
-// the entered PIN against that user's stored PIN — no shared passcode.
-export function login(userId: string, pin: string): boolean {
-  const user = getAllUsers().find(u => u.id === userId);
-  if (!user || !user.password || pin !== user.password) return false;
-  localStorage.setItem(SESSION_KEY, user.id);
-  switchUser(user.id);
-  window.dispatchEvent(new CustomEvent('sessionChanged'));
-  return true;
+export function verifyRecoveryIdentity(loginId: string, phone: string): User | null {
+  const user = findUserByLoginId(loginId);
+  if (!user || normalizePhone(user.phone) !== normalizePhone(phone)) return null;
+  return user;
 }
 
 export function logout(): void {

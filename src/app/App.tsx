@@ -29,6 +29,7 @@ const RewardsPage = lazy(() => import('./pages/RewardsPage').then(m => ({ defaul
 const WrappedPage = lazy(() => import('./pages/WrappedPage').then(m => ({ default: m.WrappedPage })));
 const SpendingDashboardPage = lazy(() => import('./pages/SpendingDashboardPage').then(m => ({ default: m.SpendingDashboardPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const PinRecoveryPage = lazy(() => import('./pages/PinRecoveryPage').then(m => ({ default: m.PinRecoveryPage })));
 const TopUpPage = lazy(() => import('./pages/TopUpPage').then(m => ({ default: m.TopUpPage })));
 
 import './utils/autoReminderScheduler';
@@ -76,6 +77,18 @@ const router = createBrowserRouter([
         <ErrorBoundary>
           <Suspense fallback={<PageLoading />}>
             <LoginPage />
+          </Suspense>
+        </ErrorBoundary>
+      </MobileFrame>
+    ),
+  },
+  {
+    path: '/recover-pin',
+    element: (
+      <MobileFrame requiresAuth={false}>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoading />}>
+            <PinRecoveryPage />
           </Suspense>
         </ErrorBoundary>
       </MobileFrame>

@@ -41,6 +41,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
   id                        TEXT PRIMARY KEY,
+  login_id                  TEXT,
   name                      TEXT NOT NULL,
   avatar                    TEXT NOT NULL,
   phone                     TEXT NOT NULL,
@@ -370,14 +371,19 @@ export async function initDatabase(): Promise<void> {
   try {
     const cols = db.exec('PRAGMA table_info(users)');
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('login_id')) {
+      db.run('ALTER TABLE users ADD COLUMN login_id TEXT');
+    }
     if (!names.includes('password')) {
       db.run('ALTER TABLE users ADD COLUMN password TEXT');
     }
     if (!names.includes('email')) {
       db.run('ALTER TABLE users ADD COLUMN email TEXT');
     }
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id
+      ON users(login_id) WHERE login_id IS NOT NULL`);
   } catch (e) {
-    console.warn('users.password/email migration skipped:', e);
+    console.warn('users login migration skipped:', e);
   }
 }
 

@@ -5,6 +5,7 @@ export type ReminderFrequency =
 
 export interface User {
   id: string;
+  loginId?: string;
   name: string;
   avatar: string;
   phone: string;
@@ -21,16 +22,17 @@ export interface User {
 const CURRENT_USER_KEY = 'nets-current-user-id';
 
 const DEFAULT_USERS: User[] = [
-  { id: '1', name: 'Alex Chen', avatar: '👨‍💼', phone: '+65 9123 4567', password: '111111' },
-  { id: '2', name: 'Sarah Tan', avatar: '👩', phone: '+65 9234 5678', password: '222222' },
-  { id: '3', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789', password: '333333' },
-  { id: '4', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890', password: '444444' },
-  { id: 'admin', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true, password: '888888' },
+  { id: '1', loginId: 'alexchen140896', name: 'Alex Chen', avatar: '👨‍💼', phone: '+65 9123 4567', password: '111111' },
+  { id: '2', loginId: 'sarahtan230394', name: 'Sarah Tan', avatar: '👩', phone: '+65 9234 5678', password: '222222' },
+  { id: '3', loginId: 'mikewong081192', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789', password: '333333' },
+  { id: '4', loginId: 'jennylim170797', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890', password: '444444' },
+  { id: 'admin', loginId: 'admin010180', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true, password: '888888' },
 ];
 
 function rowToUser(r: Record<string, any>): User {
   return {
     id: String(r.id),
+    loginId: r.login_id ?? undefined,
     name: r.name,
     avatar: r.avatar,
     phone: r.phone,
@@ -51,8 +53,8 @@ function seedDefaultUsersIfEmpty(): void {
 
   if (!hasUsers) {
     for (const u of DEFAULT_USERS) {
-      run('INSERT INTO users (id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [u.id, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null, u.isAdmin ? 1 : 0]);
+      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null, u.isAdmin ? 1 : 0]);
     }
     return;
   }
@@ -61,15 +63,18 @@ function seedDefaultUsersIfEmpty(): void {
   const admin = queryOne('SELECT id FROM users WHERE id = ?', ['admin']);
   if (!admin) {
     const a = DEFAULT_USERS.find(u => u.id === 'admin')!;
-    run('INSERT INTO users (id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [a.id, a.name, a.avatar, a.phone, a.email ?? null, a.password ?? null, 1]);
+    run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [a.id, a.loginId ?? null, a.name, a.avatar, a.phone, a.email ?? null, a.password ?? null, 1]);
   }
 
-  // Keep each default user's PIN in sync with the current defaults (so changing
-  // a PIN here updates existing databases too).
+  // Keep login IDs in sync for databases created by earlier builds. Only fill a
+  // missing PIN so a PIN changed through account recovery remains valid.
   for (const u of DEFAULT_USERS) {
-    const row = queryOne('SELECT password FROM users WHERE id = ?', [u.id]);
-    if (row && u.password && row.password !== u.password) {
+    const row = queryOne('SELECT login_id, password FROM users WHERE id = ?', [u.id]);
+    if (row && row.login_id !== u.loginId) {
+      run('UPDATE users SET login_id = ? WHERE id = ?', [u.loginId ?? null, u.id]);
+    }
+    if (row && !row.password && u.password) {
       run('UPDATE users SET password = ? WHERE id = ?', [u.password, u.id]);
     }
   }
@@ -97,8 +102,13 @@ export function switchUser(userId: string): void {
 }
 
 export function addUser(user: Omit<User, 'id'>): void {
-  run('INSERT INTO users (id, name, avatar, phone) VALUES (?, ?, ?, ?)',
-    [Date.now().toString(), user.name, user.avatar, user.phone]);
+  run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [Date.now().toString(), user.loginId ?? null, user.name, user.avatar, user.phone,
+      user.email ?? null, user.password ?? null, user.isAdmin ? 1 : 0]);
+}
+
+export function updateUserPin(userId: string, pin: string): void {
+  run('UPDATE users SET password = ? WHERE id = ?', [pin, userId]);
 }
 
 export function updateUserReminderSettings(

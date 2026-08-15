@@ -1,45 +1,59 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getUnreadNotifications, markAllNotificationsAsRead, type Notification } from '../utils/notificationStorage';
+import {
+  CHANNEL_LABELS, getNotificationPreferences, getUnreadNotifications, type Notification,
+} from '../utils/notificationStorage';
 import { getCurrentUser } from '../utils/userStorage';
 import { useNavigate } from 'react-router';
 import { useAppEvents } from '../utils/useAppEvents';
 
-const EVENTS_THAT_CHANGE_NOTIFICATIONS = ['notificationsUpdated', 'userSwitched', 'remindersUpdated'];
+const EVENTS_THAT_CHANGE_NOTIFICATIONS = [
+  'notificationsUpdated', 'userSwitched', 'remindersUpdated', 'notificationPreferencesUpdated',
+];
 
+/**
+ * The transient banner for notifications that just arrived. Dismissing it only
+ * hides the banner — nothing is marked as read, because the full history now
+ * lives in the Notification Centre and dismissing a popup should not silently
+ * clear it.
+ */
 export function NotificationPopup() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isVisible, setIsVisible] = useState(false);
-  const currentUser = getCurrentUser();
+  // Ids already shown in a banner this session, so a dismissed banner does not
+  // pop straight back up on the next unrelated update.
+  const dismissed = useRef<Set<number>>(new Set());
 
   useAppEvents(EVENTS_THAT_CHANGE_NOTIFICATIONS, () => {
-    const unread = getUnreadNotifications(getCurrentUser().id);
-    setNotifications(unread);
-    if (unread.length > 0) setIsVisible(true);
+    const user = getCurrentUser();
+    const preferences = getNotificationPreferences(user.id);
+    const pushable = getUnreadNotifications(user.id)
+      .filter(item => preferences[item.channel])
+      .filter(item => !dismissed.current.has(item.id));
+
+    setNotifications(pushable);
+    setIsVisible(pushable.length > 0);
   });
 
   const dismiss = () => {
-    markAllNotificationsAsRead(currentUser.id);
+    notifications.forEach(item => dismissed.current.add(item.id));
     setIsVisible(false);
   };
 
-  const viewReminders = () => {
-    markAllNotificationsAsRead(currentUser.id);
+  const viewAll = () => {
+    notifications.forEach(item => dismissed.current.add(item.id));
     setIsVisible(false);
-    navigate('/reminders');
+    navigate('/notifications');
   };
 
   if (notifications.length === 0 || !isVisible) return null;
 
-  // A "paid you back" notification is a payment received, not a reminder request.
-  // Show the right label/heading so a payback isn't mislabelled as a reminder.
-  const isPayback = (n: Notification) => /paid you back/i.test(n.message || '');
-  const allPaybacks = notifications.every(isPayback);
-  const heading = allPaybacks
-    ? `${notifications.length} New ${notifications.length === 1 ? 'Notification' : 'Notifications'}`
-    : `${notifications.length} New ${notifications.length === 1 ? 'Reminder' : 'Reminders'}`;
+  const channels = [...new Set(notifications.map(item => item.channel))];
+  const heading = channels.length === 1
+    ? `${notifications.length} new ${CHANNEL_LABELS[channels[0]].toLowerCase()} ${notifications.length === 1 ? 'alert' : 'alerts'}`
+    : `${notifications.length} new notifications`;
 
   return (
     <AnimatePresence>
@@ -47,17 +61,17 @@ export function NotificationPopup() {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
+        role="status"
+        aria-live="polite"
         className="absolute top-4 left-3 right-3 z-50"
       >
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-xl p-3 border border-blue-400">
           <div className="flex items-start gap-2">
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-              <Bell className="w-4 h-4 text-white" />
+              <Bell className="w-4 h-4 text-white" aria-hidden="true" />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-white text-sm mb-1">
-                {heading}
-              </h3>
+              <h3 className="font-bold text-white text-sm mb-1">{heading}</h3>
               {notifications.slice(0, 2).map((notif) => (
                 <div key={notif.id} className="mb-1 last:mb-0">
                   <p className="text-white/90 text-xs">
@@ -76,16 +90,19 @@ export function NotificationPopup() {
             </div>
             <button
               onClick={dismiss}
-              className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors flex-shrink-0"
+              aria-label="Dismiss notification banner"
+              className="w-11 h-11 -m-1.5 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors flex-shrink-0"
             >
-              <X className="w-4 h-4 text-white" />
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-white/20">
+                <X className="w-4 h-4 text-white" aria-hidden="true" />
+              </span>
             </button>
           </div>
           <button
-            onClick={viewReminders}
-            className="w-full mt-2 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-white font-semibold text-xs transition-colors"
+            onClick={viewAll}
+            className="w-full mt-2 min-h-11 bg-white/20 hover:bg-white/30 rounded-lg text-white font-semibold text-xs transition-colors"
           >
-            {allPaybacks ? 'View All' : 'View All Reminders'}
+            Open Notification Centre
           </button>
         </div>
       </motion.div>

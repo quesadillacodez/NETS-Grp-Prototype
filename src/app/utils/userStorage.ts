@@ -111,6 +111,36 @@ export function updateUserPin(userId: string, pin: string): void {
   run('UPDATE users SET password = ? WHERE id = ?', [pin, userId]);
 }
 
+export interface ProfileUpdate {
+  name?: string;
+  email?: string;
+  phone?: string;
+  avatar?: string;
+}
+
+export function updateUserProfile(userId: string, update: ProfileUpdate): void {
+  run(
+    `UPDATE users SET
+       name   = COALESCE(?, name),
+       email  = COALESCE(?, email),
+       phone  = COALESCE(?, phone),
+       avatar = COALESCE(?, avatar)
+     WHERE id = ?`,
+    [update.name ?? null, update.email ?? null, update.phone ?? null, update.avatar ?? null, userId],
+  );
+  window.dispatchEvent(new CustomEvent('userSwitched'));
+}
+
+/** A 6-digit PIN, matching the format issued at sign-up and by PIN recovery. */
+export function isValidPin(pin: string): boolean {
+  return /^\d{6}$/.test(pin);
+}
+
+export function verifyUserPin(userId: string, pin: string): boolean {
+  const row = queryOne('SELECT password FROM users WHERE id = ?', [userId]);
+  return !!row && row.password === pin;
+}
+
 export function updateUserReminderSettings(
   userId: string,
   settings: {

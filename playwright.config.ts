@@ -18,7 +18,10 @@ const launchOptions = executablePath ? { executablePath } : {};
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 90_000,
-  expect: { timeout: 15_000 },
+  // Shared CI runners are noticeably weaker than a dev machine, and every
+  // observed CI-only failure so far has been a plain timeout waiting on UI
+  // after an action (not a logic mismatch) -- give CI more headroom.
+  expect: { timeout: process.env.CI ? 25_000 : 15_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

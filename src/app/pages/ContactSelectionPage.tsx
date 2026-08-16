@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Search, Check } from 'lucide-react';
+import { Search, Check, Plus, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { getCurrentUser, getPayableUsers } from '../utils/userStorage';
+import { getContactGroups, createContactGroup, deleteContactGroup, type ContactGroup } from '../utils/groupStorage';
 import { DarkHeader } from '../components/DarkHeader';
 import { useRequiredState } from '../utils/useRequiredState';
 import type { PaymentFlowContext } from '../utils/paymentFlow';
@@ -31,6 +32,9 @@ export function ContactSelectionPage() {
     .map((user): Contact => ({ id: user.id, name: user.name, phone: user.phone, avatar: user.avatar }));
   const plannedIds = state?.participantUserIds?.filter(id => contacts.some(contact => contact.id === id)) ?? [];
   const [selectedIds, setSelectedIds] = useState<string[]>(() => plannedIds.slice(0, Math.max(0, paxCount - 1)));
+  const [groups, setGroups] = useState<ContactGroup[]>(() => getContactGroups(currentUser.id));
+  const [showSaveGroup, setShowSaveGroup] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState('');
 
   if (!state) return null;
 
@@ -44,6 +48,25 @@ export function ContactSelectionPage() {
     } else if (selectedIds.length < paxCount - 1) {
       setSelectedIds([...selectedIds, id]);
     }
+  };
+
+  const applyGroup = (group: ContactGroup) => {
+    const availableIds = group.members.map((m) => m.id).filter((id) => contacts.some((c) => c.id === id));
+    setSelectedIds(availableIds.slice(0, Math.max(0, paxCount - 1)));
+  };
+
+  const saveCurrentAsGroup = () => {
+    const name = groupNameDraft.trim();
+    if (!name || selectedIds.length === 0) return;
+    const group = createContactGroup(currentUser.id, name, selectedIds);
+    setGroups((prev) => [group, ...prev]);
+    setGroupNameDraft('');
+    setShowSaveGroup(false);
+  };
+
+  const removeGroup = (id: number) => {
+    deleteContactGroup(id);
+    setGroups((prev) => prev.filter((g) => g.id !== id));
   };
 
   const selectedCount = selectedIds.length + 1;
@@ -73,6 +96,83 @@ export function ContactSelectionPage() {
       </DarkHeader>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 pb-36">
+        {groups.length > 0 && (
+          <div className="mb-5">
+            <p className="text-xs text-muted-foreground mb-3 uppercase tracking-wide">Group Templates</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden">
+              {groups.map((group) => (
+                <div key={group.id} className="relative shrink-0">
+                  <button
+                    onClick={() => applyGroup(group)}
+                    className="flex items-center gap-2 pl-2 pr-3 py-2 rounded-2xl bg-secondary hover:bg-secondary/80 border border-border"
+                  >
+                    <div className="flex -space-x-2">
+                      {group.members.slice(0, 3).map((m) => (
+                        <div
+                          key={m.id}
+                          className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-sm border-2 border-white"
+                        >
+                          {m.avatar}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-semibold text-foreground leading-tight">{group.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{group.members.length} people</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => removeGroup(group.id)}
+                    aria-label={`Delete ${group.name}`}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-border shadow flex items-center justify-center"
+                  >
+                    <X className="w-3 h-3 text-muted-foreground" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedIds.length > 0 && (
+          <div className="mb-4">
+            {!showSaveGroup ? (
+              <button
+                onClick={() => setShowSaveGroup(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Save this group for next time
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="e.g. Secondary school friends"
+                  value={groupNameDraft}
+                  onChange={(e) => setGroupNameDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveCurrentAsGroup()}
+                  className="flex-1 px-3 py-2 bg-secondary rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <button
+                  onClick={saveCurrentAsGroup}
+                  disabled={!groupNameDraft.trim()}
+                  className="px-3 py-2 rounded-xl bg-primary text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setShowSaveGroup(false); setGroupNameDraft(''); }}
+                  className="px-2 py-2 text-xs text-muted-foreground"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <p className="text-xs text-muted-foreground mb-3 uppercase tracking-wide">From Your Contacts</p>
 
         <div className="space-y-2">

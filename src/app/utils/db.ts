@@ -306,8 +306,28 @@ CREATE TABLE IF NOT EXISTS insights (
   average_payment_time   REAL,
   fastest_payment        REAL,
   slowest_payment        REAL,
+  reliability_score      REAL,
   updated_at             INTEGER,
   PRIMARY KEY (owner_user_id, person_user_id)
+);
+
+-- Saved "group templates" (e.g. "Secondary School Friends") so a bill split can
+-- select everyone in one tap instead of picking contacts one by one.
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_user_id TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contact_groups_owner ON contact_groups(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS contact_group_members (
+  group_id INTEGER NOT NULL,
+  user_id  TEXT NOT NULL,
+  PRIMARY KEY (group_id, user_id),
+  FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
 );
 `;
 
@@ -451,6 +471,16 @@ export async function initDatabase(): Promise<void> {
     }
   } catch (e) {
     console.warn('reminders.thank_you migration skipped:', e);
+  }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(insights)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('reliability_score')) {
+      db.run('ALTER TABLE insights ADD COLUMN reliability_score REAL');
+    }
+  } catch (e) {
+    console.warn('insights.reliability_score migration skipped:', e);
   }
 
   try {

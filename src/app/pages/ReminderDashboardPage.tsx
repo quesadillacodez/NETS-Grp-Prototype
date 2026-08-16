@@ -200,6 +200,20 @@ function InsightsTab({ insights }: { insights: any[] }) {
   );
 }
 
+function ReliabilityBadge({ score }: { score: number | null }) {
+  if (score === null) return null;
+  const isReliable = score >= 70;
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
+        isReliable ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+      }`}
+    >
+      {score}% reliable
+    </span>
+  );
+}
+
 function InsightCard({ insight }: { insight: any }) {
   const [expanded, setExpanded] = useState<'paid' | 'pending' | null>(null);
   const currentUser = getCurrentUser();
@@ -220,7 +234,10 @@ function InsightCard({ insight }: { insight: any }) {
       <div className="flex items-center gap-2 mb-3">
         <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-xl">{insight.avatar}</div>
         <div>
-          <p className="font-bold text-sm text-foreground">{insight.userName}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-bold text-sm text-foreground">{insight.userName}</p>
+            <ReliabilityBadge score={insight.reliabilityScore} />
+          </div>
           <p className="text-xs text-muted-foreground">{insight.totalReminders} reminder{insight.totalReminders !== 1 ? 's' : ''}</p>
         </div>
       </div>

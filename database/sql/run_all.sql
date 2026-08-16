@@ -244,6 +244,25 @@ CREATE TABLE IF NOT EXISTS insights (
   average_payment_time   REAL,
   fastest_payment        REAL,
   slowest_payment        REAL,
+  reliability_score      REAL,
   updated_at             INTEGER,
   PRIMARY KEY (owner_user_id, person_user_id)
+);
+
+-- ---------- contact_groups ----------
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_user_id TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------- contact_group_members ----------
+CREATE TABLE IF NOT EXISTS contact_group_members (
+  group_id INTEGER NOT NULL,
+  user_id  TEXT NOT NULL,
+  PRIMARY KEY (group_id, user_id),
+  FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
 );

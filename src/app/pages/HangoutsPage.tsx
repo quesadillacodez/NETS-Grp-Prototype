@@ -31,6 +31,7 @@ import {
   type Hangout,
 } from '../utils/hangoutStorage';
 import { getAllUsers, getCurrentUser } from '../utils/userStorage';
+import { getContactGroups, createContactGroup, deleteContactGroup, type ContactGroup } from '../utils/groupStorage';
 import { createPaymentId } from '../utils/paymentFlow';
 import { useAppEvents } from '../utils/useAppEvents';
 
@@ -169,12 +170,31 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
   // already been made, and tapping one of them silently removed them instead of
   // adding them — the opposite of what the tap appeared to do.
   const [inviteIds, setInviteIds] = useState<string[]>([]);
+  const [groups, setGroups] = useState<ContactGroup[]>(() => getContactGroups(ownerId));
+  const [showSaveGroup, setShowSaveGroup] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState('');
 
   const toggleActivity = (id: number) => {
     setActivityIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   };
   const toggleInvite = (id: string) => {
     setInviteIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  };
+  const applyGroup = (group: ContactGroup) => {
+    const memberIds = group.members.map(m => m.id).filter(id => contacts.some(c => c.id === id));
+    setInviteIds(current => [...new Set([...current, ...memberIds])]);
+  };
+  const saveCurrentAsGroup = () => {
+    const name = groupNameDraft.trim();
+    if (!name || inviteIds.length === 0) return;
+    const group = createContactGroup(ownerId, name, inviteIds);
+    setGroups(current => [group, ...current]);
+    setGroupNameDraft('');
+    setShowSaveGroup(false);
+  };
+  const removeGroup = (id: number) => {
+    deleteContactGroup(id);
+    setGroups(current => current.filter(g => g.id !== id));
   };
 
   const selectedActivities = activities.filter(activity => activityIds.includes(activity.id));
@@ -236,6 +256,42 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
                 : `${inviteIds.length} ${inviteIds.length === 1 ? 'friend' : 'friends'} selected`}
             </span>
           </div>
+
+          {groups.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">Group templates</p>
+              <div className="flex gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden">
+                {groups.map(group => (
+                  <div key={group.id} className="relative shrink-0">
+                    <button
+                      onClick={() => applyGroup(group)}
+                      className="flex items-center gap-2 rounded-xl border border-border bg-secondary py-2 pl-2 pr-3"
+                    >
+                      <div className="flex -space-x-2">
+                        {group.members.slice(0, 3).map(m => (
+                          <div key={m.id} className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-primary/15 text-xs">
+                            {m.avatar}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[11px] font-black leading-tight text-foreground">{group.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{group.members.length} people</p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => removeGroup(group.id)}
+                      aria-label={`Delete ${group.name}`}
+                      className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full border border-border bg-white shadow"
+                    >
+                      <X size={11} className="text-muted-foreground" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2">
             {contacts.map(contact => {
               const selected = inviteIds.includes(contact.id);
@@ -260,6 +316,41 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
             <p className="mt-2 text-[10px] text-muted-foreground">
               Tap a friend to invite them. A Hangout needs at least one other person to vote.
             </p>
+          )}
+
+          {inviteIds.length > 0 && (
+            <div className="mt-3">
+              {!showSaveGroup ? (
+                <button onClick={() => setShowSaveGroup(true)} className="text-[11px] font-black text-primary">
+                  + Save these friends as a group
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="e.g. Secondary school friends"
+                    value={groupNameDraft}
+                    onChange={event => setGroupNameDraft(event.target.value)}
+                    onKeyDown={event => event.key === 'Enter' && saveCurrentAsGroup()}
+                    className="flex-1 rounded-xl border border-border px-3 py-2 text-xs outline-none focus:border-primary"
+                  />
+                  <button
+                    onClick={saveCurrentAsGroup}
+                    disabled={!groupNameDraft.trim()}
+                    className="rounded-xl bg-primary px-3 py-2 text-[11px] font-black text-white disabled:opacity-40"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setShowSaveGroup(false); setGroupNameDraft(''); }}
+                    className="px-2 py-2 text-[11px] font-bold text-muted-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

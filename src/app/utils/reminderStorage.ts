@@ -128,6 +128,24 @@ export interface PersonInsight {
   averagePaymentTime: number;
   fastestPayment: number;
   slowestPayment: number;
+  /** 0-100, or null when there's no reminder history yet to score. */
+  reliabilityScore: number | null;
+}
+
+// How trustworthy a person is to pay you back: rewards a high share of paid
+// reminders, then docks points the slower they tend to pay (capped at -30 so
+// one slow payment doesn't wipe out an otherwise-reliable history).
+export function computeReliabilityScore(
+  paidReminders: number,
+  totalReminders: number,
+  averagePaymentTime: number
+): number | null {
+  if (totalReminders <= 0) return null;
+  const completionRate = paidReminders / totalReminders;
+  const latePenalty = paidReminders > 0 && averagePaymentTime > 3
+    ? Math.min(30, (averagePaymentTime - 3) * 5)
+    : 0;
+  return Math.max(0, Math.min(100, Math.round(completionRate * 100 - latePenalty)));
 }
 
 export function getUserInsights(currentUserId: string): PersonInsight[] {
@@ -153,18 +171,24 @@ export function getUserInsights(currentUserId: string): PersonInsight[] {
     [currentUserId]
   );
 
-  const insights = rows.map(r => ({
-    userId: String(r.userId),
-    userName: r.userName as string,
-    avatar: r.avatar as string,
-    totalReminders: Number(r.totalReminders),
-    paidReminders: Number(r.paidReminders),
-    pendingReminders: Number(r.pendingReminders),
-    averageReminderCount: parseFloat((Number(r.averageReminderCount) || 0).toFixed(1)),
-    averagePaymentTime: parseFloat((Number(r.averagePaymentTime) || 0).toFixed(2)),
-    fastestPayment: parseFloat((Number(r.fastestPayment) || 0).toFixed(2)),
-    slowestPayment: parseFloat((Number(r.slowestPayment) || 0).toFixed(2)),
-  }));
+  const insights = rows.map(r => {
+    const paidReminders = Number(r.paidReminders);
+    const totalReminders = Number(r.totalReminders);
+    const averagePaymentTime = parseFloat((Number(r.averagePaymentTime) || 0).toFixed(2));
+    return {
+      userId: String(r.userId),
+      userName: r.userName as string,
+      avatar: r.avatar as string,
+      totalReminders,
+      paidReminders,
+      pendingReminders: Number(r.pendingReminders),
+      averageReminderCount: parseFloat((Number(r.averageReminderCount) || 0).toFixed(1)),
+      averagePaymentTime,
+      fastestPayment: parseFloat((Number(r.fastestPayment) || 0).toFixed(2)),
+      slowestPayment: parseFloat((Number(r.slowestPayment) || 0).toFixed(2)),
+      reliabilityScore: computeReliabilityScore(paidReminders, totalReminders, averagePaymentTime),
+    };
+  });
 
   // Materialise the result into the insights table so it can be viewed in the
   // database. Recomputed from live reminders each time, so it's never stale or
@@ -176,12 +200,13 @@ export function getUserInsights(currentUserId: string): PersonInsight[] {
       `INSERT OR REPLACE INTO insights
          (owner_user_id, person_user_id, person_name, avatar, total_reminders, paid_reminders,
           pending_reminders, average_reminder_count, average_payment_time, fastest_payment,
-          slowest_payment, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          slowest_payment, reliability_score, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         currentUserId, item.userId, item.userName, item.avatar, item.totalReminders,
         item.paidReminders, item.pendingReminders, item.averageReminderCount,
-        item.averagePaymentTime, item.fastestPayment, item.slowestPayment, now,
+        item.averagePaymentTime, item.fastestPayment, item.slowestPayment,
+        item.reliabilityScore, now,
       ],
     );
   }

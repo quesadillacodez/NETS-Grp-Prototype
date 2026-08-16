@@ -5,7 +5,7 @@ import { BottomNav } from '../components/BottomNav';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { NotificationPopup } from '../components/NotificationPopup';
 import { useNavigate } from 'react-router';
-import { describeTransaction, getAllTransactions } from '../utils/transactionStorage';
+import { describeTransaction, getAllTransactions, walletBalanceFrom } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
 import { getRemindersToReceive, getRemindersToPay } from '../utils/reminderStorage';
 import { useAppEvents } from '../utils/useAppEvents';
@@ -13,8 +13,6 @@ import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import { getXPStats } from '../utils/rewardStorage';
-
-const BASE_BALANCE = 2500.00;
 
 const QUICK_ACTIONS = [
   { icon: CreditCard, label: 'Top-up',    path: '/top-up' },
@@ -50,7 +48,7 @@ export function HomePage() {
     return () => { delete (window as any).showAutoReminderToast; };
   }, []);
 
-  const balance = BASE_BALANCE + transactions.reduce((sum, tx) => sum + tx.amount, 0);
+  const balance = walletBalanceFrom(transactions);
   const xp = getXPStats(currentUser.id);
 
   return (

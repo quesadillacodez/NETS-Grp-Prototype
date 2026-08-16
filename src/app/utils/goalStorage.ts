@@ -1,4 +1,7 @@
 import { query, run } from './db';
+import { addTransaction, formatDateForTransaction, getWalletBalance } from './transactionStorage';
+
+const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export interface Goal {
   id: number;
@@ -40,17 +43,82 @@ export function updateGoal(g: Goal): void {
   notifyGoals();
 }
 
-export function contributeToGoal(goalId: number, amount: number): void {
-  const rows = query('SELECT target, current FROM savings_goals WHERE id = ?', [goalId]);
-  if (!rows.length) return;
-  const target = Number(rows[0].target);
-  const next = Math.min(Number(rows[0].current) + amount, target);
-  run('UPDATE savings_goals SET current = ? WHERE id = ?', [next, goalId]);
-  notifyGoals();
+export function getGoal(userId: string, goalId: number): Goal | null {
+  return getGoals(userId).find(goal => goal.id === goalId) ?? null;
 }
 
-export function deleteGoal(goalId: number): void {
-  run('DELETE FROM savings_goals WHERE id = ?', [goalId]);
+export interface GoalTransferResult {
+  ok: boolean;
+  /** How much actually moved. Zero on failure. */
+  moved: number;
+  reason?: string;
+}
+
+function refuse(reason: string): GoalTransferResult {
+  return { ok: false, moved: 0, reason };
+}
+
+/**
+ * Move money from the wallet into a goal.
+ *
+ * A contribution is a real movement of the customer's money, so it is recorded
+ * as a transaction and leaves the spendable balance. It is not spending — the
+ * money is still theirs, just earmarked — so it does not count towards the
+ * spending dashboard's category totals.
+ */
+export function contributeToGoal(userId: string, goalId: number, amount: number): GoalTransferResult {
+  if (!Number.isFinite(amount) || amount <= 0) return refuse('Enter an amount greater than zero.');
+
+  const goal = getGoal(userId, goalId);
+  if (!goal) return refuse('That goal no longer exists.');
+
+  const available = getWalletBalance(userId);
+  if (amount > available) return refuse(`You only have ${money(available)} available in your wallet.`);
+
+  const room = goal.target - goal.current;
+  if (room <= 0) return refuse('This goal is already fully funded.');
+  if (amount > room) return refuse(`Only ${money(room)} left to reach this goal.`);
+
+  run('UPDATE savings_goals SET current = ? WHERE id = ? AND user_id = ?',
+    [goal.current + amount, goalId, userId]);
+  addTransaction({
+    name: goal.name,
+    amount: -amount,
+    date: formatDateForTransaction(),
+    category: 'savings',
+    kind: 'goal_contribution',
+  }, userId);
+  notifyGoals();
+  return { ok: true, moved: amount };
+}
+
+/** Return money from a goal to the spendable wallet balance. */
+export function withdrawFromGoal(userId: string, goalId: number, amount: number): GoalTransferResult {
+  if (!Number.isFinite(amount) || amount <= 0) return refuse('Enter an amount greater than zero.');
+
+  const goal = getGoal(userId, goalId);
+  if (!goal) return refuse('That goal no longer exists.');
+  if (goal.current <= 0) return refuse('There is nothing saved in this goal yet.');
+  if (amount > goal.current) return refuse(`This goal only holds ${money(goal.current)}.`);
+
+  run('UPDATE savings_goals SET current = ? WHERE id = ? AND user_id = ?',
+    [goal.current - amount, goalId, userId]);
+  addTransaction({
+    name: goal.name,
+    amount,
+    date: formatDateForTransaction(),
+    category: 'savings',
+    kind: 'goal_withdrawal',
+  }, userId);
+  notifyGoals();
+  return { ok: true, moved: amount };
+}
+
+/** Deleting a goal returns whatever it holds to the wallet rather than losing it. */
+export function deleteGoal(userId: string, goalId: number): void {
+  const goal = getGoal(userId, goalId);
+  if (goal && goal.current > 0) withdrawFromGoal(userId, goalId, goal.current);
+  run('DELETE FROM savings_goals WHERE id = ? AND user_id = ?', [goalId, userId]);
   notifyGoals();
 }
 

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
 import { logout } from '../utils/authStorage';
-import { describeTransaction, getAllTransactions, type Transaction } from '../utils/transactionStorage';
+import { describeTransaction, getAllTransactions, walletBalanceFrom, type Transaction } from '../utils/transactionStorage';
 import { getRedemptions } from '../utils/redemptionStorage';
 import {
   getMerchants, saveMerchant, deleteMerchant,
@@ -145,10 +145,9 @@ function ActivityModal({ onClose, onSave, editActivity }: {
 
 // ─── User detail drill-down (light) ──────────────────────────────────────────
 function UserDetail({ user, onBack }: { user: UserActivity; onBack: () => void }) {
-  const BASE_BALANCE = 2500;
   const txns = getAllTransactions(user.id);
   const redemptions = getRedemptions(user.id);
-  const balance = BASE_BALANCE + txns.reduce((s, t) => s + t.amount, 0);
+  const balance = walletBalanceFrom(txns);
 
   return (
     <motion.div

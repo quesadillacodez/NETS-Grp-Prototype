@@ -98,6 +98,11 @@ individual feature ownership clear:
   wallet cashback writes back to the same transaction ledger used by Home.
 - **Admin Portal (`/admin`):** management users can inspect live users and transactions,
   manage merchants, and maintain partner rewards that appear in the XP Rewards Store.
+- **Merchant insights and paid placements (`/admin` → Rewards):** per-merchant reporting
+  derived from the ledger — sales, busiest hour, repeat customers, most-redeemed rewards,
+  and how many customers came back and paid after redeeming. Merchants can also buy
+  Featured or Spotlight position in the store; promoted rewards are labelled *Sponsored*
+  on the customer side and keep their real price, distance and availability.
 - **Cards on Home:** a swipeable carousel of the customer's NETS cards — the vCashCard
   (the wallet itself), a NETS Prepaid Card and a Motoring CashCard. The last two hold
   their own float: they can be loaded from the wallet, emptied back into it, and frozen.

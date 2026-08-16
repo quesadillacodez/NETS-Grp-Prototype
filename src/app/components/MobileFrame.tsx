@@ -1,6 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { getCurrentUser, isAdminUser } from '../utils/userStorage';
+import { getCurrentUser, getUserHomePath, isAdminUser, isMerchantUser } from '../utils/userStorage';
 import { isLoggedIn } from '../utils/authStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 
@@ -12,13 +12,15 @@ interface MobileFrameProps {
 // Pages an admin IS allowed to stay on. Everything else redirects to /admin.
 const ADMIN_ALLOWED = ['/admin', '/manage-merchants'];
 
-function AdminRedirectGuard() {
+function RoleRedirectGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [tick, setTick] = useState(0);
   useAppEvents(['userSwitched', 'databaseReady', 'sessionChanged'], () => setTick((t) => t + 1));
 
-  const admin = isAdminUser(getCurrentUser());
+  const user = getCurrentUser();
+  const admin = isAdminUser(user);
+  const merchant = isMerchantUser(user);
   const path = location.pathname;
 
   // Admin on a normal user page → send to the portal.
@@ -27,8 +29,14 @@ function AdminRedirectGuard() {
   }
   // Non-admin who ended up on an admin-only page (e.g. just switched away from
   // the admin account inside the portal) → send back to home.
-  if (!admin && (path === '/admin' || path === '/manage-merchants')) {
-    queueMicrotask(() => navigate('/', { replace: true }));
+  if (merchant && path !== '/merchant') {
+    queueMicrotask(() => navigate('/merchant', { replace: true }));
+  }
+  if (!admin && !merchant && (path === '/admin' || path === '/manage-merchants' || path === '/merchant')) {
+    queueMicrotask(() => navigate(getUserHomePath(user), { replace: true }));
+  }
+  if (admin && path === '/merchant') {
+    queueMicrotask(() => navigate('/admin', { replace: true }));
   }
   void tick;
   return null;
@@ -46,7 +54,7 @@ function SessionGuard() {
     queueMicrotask(() => navigate('/login', { replace: true }));
     return null;
   }
-  return <AdminRedirectGuard />;
+  return <RoleRedirectGuard />;
 }
 
 export function MobileFrame({ children, requiresAuth = true }: MobileFrameProps) {

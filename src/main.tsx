@@ -5,9 +5,10 @@
   import { initDatabase, syncDatabaseFilesNow } from "./app/utils/db";
   import { seedDealsIfEmpty, reconcileDealRedemptionCounts } from "./app/utils/dealStorage";
   import { seedMerchantsIfEmpty, ensureFashionMerchants } from "./app/utils/merchantStorage";
-  import { syncAllReminderSettings } from "./app/utils/userStorage";
+  import { getAllUsers, syncAllReminderSettings } from "./app/utils/userStorage";
   import { seedDemoHistoryIfEmpty } from "./app/utils/reminderStorage";
-  import { logout } from "./app/utils/authStorage";
+  import { restoreServerSession } from "./app/utils/authStorage";
+  import { seedMerchantSalesIfEmpty } from "./app/utils/merchantInsightStorage";
 
   const root = createRoot(document.getElementById("root")!);
   const startupStartedAt = performance.now();
@@ -18,14 +19,16 @@
     if (remaining > 0) await new Promise(resolve => window.setTimeout(resolve, remaining));
   }
 
-  // Always start on the login screen on a fresh page load / run, even if a
-  // previous session (e.g. the admin account) was remembered. Clearing the
-  // stored session here means the app opens on "Sign in to NETS" every time;
-  // navigating within the app after signing in still works normally.
-  logout();
-
   initDatabase()
     .then(async () => {
+      // Restore the HttpOnly server session and hydrate the newest synchronized
+      // database before rendering any private screen.
+      await restoreServerSession();
+
+      // Ensure the public user/contact rows exist before any seeded reminder or
+      // relationship can reference them. Credentials are never stored here.
+      getAllUsers();
+
       // Reference catalogues only (the deals shown in Rewards). No fabricated
       // user activity is seeded — reminders, transactions and goals are created
       // solely by using the app.
@@ -36,6 +39,7 @@
       // the fashion merchants into any DB seeded before they were added.
       seedMerchantsIfEmpty();
       ensureFashionMerchants();
+      seedMerchantSalesIfEmpty();
 
       // Populate the reminder_settings table for every user so it's viewable
       // in the database from the start.
@@ -57,3 +61,11 @@
       console.error("Failed to start database:", err);
       root.render(<App />);
     });
+
+  if ('serviceWorker' in navigator && import.meta.env.PROD) {
+    window.addEventListener('load', () => {
+      void navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
+        console.warn('Offline support could not be registered:', error);
+      });
+    });
+  }

@@ -4,7 +4,7 @@ import {
   MapPin, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
@@ -588,8 +588,12 @@ function HistoryView({ userId, onOpen }: { userId: string; onOpen: (redemption: 
 }
 
 export function RewardsPage() {
+  const [searchParams] = useSearchParams();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
-  const [tab, setTab] = useState<RewardsTab>('overview');
+  const [tab, setTab] = useState<RewardsTab>(() => {
+    const requested = searchParams.get('tab');
+    return requested === 'store' || requested === 'wallet' || requested === 'history' ? requested : 'overview';
+  });
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedVoucher, setSelectedVoucher] = useState<RewardRedemption | null>(null);
   const [receipt, setReceipt] = useState<RewardRedemption | null>(null);

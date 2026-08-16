@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NETS Pay Together">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0066ff"/>
+      <stop offset="1" stop-color="#003b80"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="416" cy="96" r="86" fill="#19c37d" opacity=".22"/>
+  <path d="M112 346V166h57l87 104V166h72v180h-56l-88-104v104z" fill="#fff"/>
+  <rect x="342" y="166" width="58" height="180" rx="18" fill="#19c37d"/>
+</svg>

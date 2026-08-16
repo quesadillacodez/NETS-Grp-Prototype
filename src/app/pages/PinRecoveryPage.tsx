@@ -14,17 +14,10 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
-import { verifyRecoveryIdentity } from '../utils/authStorage';
-import { isAcceptablePin, resetLoginSecurity } from '../utils/loginSecurity';
-import { updateUserPin } from '../utils/userStorage';
+import { isAcceptablePin } from '../utils/loginSecurity';
+import { resetPinWithToken, startPinRecovery, verifyPinRecovery } from '../utils/serverApi';
 
 type RecoveryStep = 'identify' | 'verify' | 'reset' | 'complete';
-
-function createVerificationCode(): string {
-  const values = new Uint32Array(1);
-  crypto.getRandomValues(values);
-  return String(100_000 + (values[0] % 900_000));
-}
 
 function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -55,9 +48,10 @@ export function PinRecoveryPage() {
   const [step, setStep] = useState<RecoveryStep>('identify');
   const [loginId, setLoginId] = useState(initialLoginId);
   const [phone, setPhone] = useState('');
-  const [accountId, setAccountId] = useState('');
   const [maskedPhone, setMaskedPhone] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
+  const [challengeId, setChallengeId] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [demoCode, setDemoCode] = useState('');
   const [enteredCode, setEnteredCode] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -73,17 +67,17 @@ export function PinRecoveryPage() {
     setError('');
     setIsWorking(true);
     await pause();
-    const user = verifyRecoveryIdentity(loginId, phone);
-    setIsWorking(false);
-    if (!user) {
-      setError('Those details do not match our records. Check them and try again.');
-      return;
+    try {
+      const recovery = await startPinRecovery(loginId, phone);
+      setChallengeId(recovery.challengeId);
+      setMaskedPhone(recovery.destination);
+      setDemoCode(recovery.demoCode ?? '');
+      setStep('verify');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Verification delivery is unavailable. Please try again.');
+    } finally {
+      setIsWorking(false);
     }
-
-    setAccountId(user.id);
-    setMaskedPhone(maskPhone(user.phone));
-    setVerificationCode(createVerificationCode());
-    setStep('verify');
   };
 
   const verifyCode = async (event: FormEvent<HTMLFormElement>) => {
@@ -92,12 +86,15 @@ export function PinRecoveryPage() {
     setError('');
     setIsWorking(true);
     await pause();
-    setIsWorking(false);
-    if (enteredCode !== verificationCode) {
-      setError('That verification code is not correct. Please try again.');
-      return;
+    try {
+      const verified = await verifyPinRecovery(challengeId, enteredCode);
+      setResetToken(verified.resetToken);
+      setStep('reset');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'That verification code is invalid or has expired.');
+    } finally {
+      setIsWorking(false);
     }
-    setStep('reset');
   };
 
   const saveNewPin = async (event: FormEvent<HTMLFormElement>) => {
@@ -115,10 +112,14 @@ export function PinRecoveryPage() {
 
     setIsWorking(true);
     await pause();
-    updateUserPin(accountId, newPin);
-    resetLoginSecurity();
-    setIsWorking(false);
-    setStep('complete');
+    try {
+      await resetPinWithToken(resetToken, newPin);
+      setStep('complete');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Your PIN could not be reset. Please start again.');
+    } finally {
+      setIsWorking(false);
+    }
   };
 
   const goBack = () => {
@@ -194,12 +195,15 @@ export function PinRecoveryPage() {
           <form onSubmit={verifyCode} noValidate>
             <div className="grid size-12 place-items-center rounded-2xl bg-blue-50 text-[#0053a0]"><MessageSquareText className="size-6" /></div>
             <h2 className="mt-5 text-xl font-black text-slate-900">Check your messages</h2>
-            <p className="mt-1 text-sm leading-relaxed text-slate-500">We sent a six-digit verification code to {maskedPhone}.</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-500">If the details matched, we sent a six-digit verification code to {maskedPhone}.</p>
 
-            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Prototype verification code</p>
-              <p className="mt-1 font-mono text-xl font-black tracking-[0.3em] text-amber-900">{verificationCode}</p>
-            </div>
+            {demoCode ? (
+              <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3" data-testid="development-otp">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Local development code</p>
+                <p className="mt-1 font-mono text-xl font-black tracking-[0.3em] text-amber-900">{demoCode}</p>
+                <p className="mt-1 text-[10px] text-amber-700">Never returned by the production server.</p>
+              </div>
+            ) : null}
 
             <label htmlFor="recovery-code" className="mb-2 mt-5 block text-xs font-bold uppercase tracking-wider text-slate-500">Verification code</label>
             <div className="flex h-14 items-center rounded-2xl border border-slate-200 bg-slate-50 px-4 focus-within:border-[#0066ff] focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">

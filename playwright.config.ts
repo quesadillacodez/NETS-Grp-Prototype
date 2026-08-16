@@ -19,10 +19,12 @@ export default defineConfig({
   testDir: './tests/e2e',
   timeout: 90_000,
   expect: { timeout: 15_000 },
-  fullyParallel: true,
+  // Authentication and PIN recovery are intentionally server-backed. Keep the
+  // suite serial so a credential mutation cannot race another sign-in.
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  workers: 1,
   reporter: process.env.CI
     ? [['github'], ['html', { open: 'never' }], ['list']]
     : [['list']],
@@ -54,5 +56,12 @@ export default defineConfig({
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',
+    env: {
+      ...process.env,
+      RESET_DEMO_DATA: 'true',
+      NETS_DATA_FILE: 'tmp/playwright-auth.json',
+      EXPOSE_DEMO_OTP: 'true',
+      VITE_DISABLE_CLOUD_SYNC: 'true',
+    },
   },
 });

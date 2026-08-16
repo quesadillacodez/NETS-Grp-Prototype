@@ -53,6 +53,7 @@ export function clearActivityData(): void {
     DELETE FROM notifications;
     DELETE FROM reminders;
     DELETE FROM transactions;
+    DELETE FROM merchant_sales WHERE source = 'payment';
     DELETE FROM redemptions;
     DELETE FROM reward_redemptions;
     DELETE FROM saved_deals;

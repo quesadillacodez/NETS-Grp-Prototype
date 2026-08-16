@@ -4,6 +4,10 @@ import { USERS, openApp } from './helpers';
 const NEW_PIN = '246813';
 
 test.describe('PIN recovery', () => {
+  test.afterEach(async ({ request }) => {
+    await request.post('/api/test/reset', { headers: { 'X-NETS-CSRF': '1' } });
+  });
+
   test('a customer verifies their identity, sets a new PIN and signs in with it', async ({ page }) => {
     await openApp(page);
     await page.getByRole('button', { name: 'Forgot PIN?' }).click();
@@ -16,7 +20,7 @@ test.describe('PIN recovery', () => {
 
     // Step 2 — the prototype shows the code on screen instead of sending an SMS.
     await expect(page.getByRole('heading', { name: 'Check your messages' })).toBeVisible();
-    const code = (await page.getByText(/^\d{6}$/).first().innerText()).trim();
+    const code = (await page.getByTestId('development-otp').getByText(/^\d{6}$/).innerText()).trim();
     expect(code).toMatch(/^\d{6}$/);
     await page.locator('#recovery-code').fill(code);
     await page.getByRole('button', { name: 'Verify code' }).click();
@@ -37,7 +41,7 @@ test.describe('PIN recovery', () => {
     await expect(page.getByText(`Welcome back, ${USERS.mike.firstName}!`)).toBeVisible();
   });
 
-  test('recovery is refused when the mobile number does not match the account', async ({ page }) => {
+  test('recovery does not reveal whether the account and mobile number match', async ({ page }) => {
     await openApp(page);
     await page.getByRole('button', { name: 'Forgot PIN?' }).click();
 
@@ -45,7 +49,11 @@ test.describe('PIN recovery', () => {
     await page.locator('#recovery-phone').fill('+65 0000 0000');
     await page.getByRole('button', { name: 'Send verification code' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Confirm your account' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Check your messages' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Check your messages' })).toBeVisible();
+    await expect(page.getByText(/If the details matched/)).toBeVisible();
+    await expect(page.getByTestId('development-otp')).toHaveCount(0);
+    await page.locator('#recovery-code').fill('000000');
+    await page.getByRole('button', { name: 'Verify code' }).click();
+    await expect(page.getByRole('alert')).toContainText('invalid or has expired');
   });
 });

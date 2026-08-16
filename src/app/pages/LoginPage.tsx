@@ -11,15 +11,8 @@ import {
 } from 'lucide-react';
 import { NETSLogo } from '../components/NETSLogo';
 import { loginWithCredentials } from '../utils/authStorage';
-import {
-  applyFailedLogin,
-  EMPTY_LOGIN_SECURITY_STATE,
-  loadLoginSecurityState,
-  MAX_LOGIN_ATTEMPTS,
-  remainingLockoutSeconds,
-  resetLoginSecurity,
-  storeLoginSecurityState,
-} from '../utils/loginSecurity';
+import { ApiError } from '../utils/serverApi';
+import { getUserHomePath } from '../utils/userStorage';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -31,26 +24,24 @@ export function LoginPage() {
   const [showPin, setShowPin] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState('');
-  const [securityState, setSecurityState] = useState(loadLoginSecurityState);
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [clock, setClock] = useState(Date.now);
-  const lockoutSeconds = remainingLockoutSeconds(securityState, clock);
+  const lockoutSeconds = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - clock) / 1000)) : 0;
   const isLocked = lockoutSeconds > 0;
 
   useEffect(() => {
-    const lockedUntil = securityState.lockedUntil;
     if (!lockedUntil) return;
 
     const timer = window.setInterval(() => {
       const now = Date.now();
       setClock(now);
       if (now >= lockedUntil) {
-        resetLoginSecurity();
-        setSecurityState(EMPTY_LOGIN_SECURITY_STATE);
+        setLockedUntil(null);
         setError('');
       }
     }, 250);
     return () => window.clearInterval(timer);
-  }, [securityState.lockedUntil]);
+  }, [lockedUntil]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -59,26 +50,24 @@ export function LoginPage() {
     setError('');
     setIsSigningIn(true);
     await new Promise(resolve => window.setTimeout(resolve, reduceMotion ? 0 : 450));
-    const user = loginWithCredentials(loginId, pin);
-    setIsSigningIn(false);
-
-    if (user) {
-      resetLoginSecurity();
-      setSecurityState(EMPTY_LOGIN_SECURITY_STATE);
-      navigate(user.isAdmin ? '/admin' : '/', { replace: true });
-      return;
+    try {
+      const user = await loginWithCredentials(loginId, pin);
+      navigate(getUserHomePath(user), { replace: true });
+    } catch (caught) {
+      const apiError = caught instanceof ApiError ? caught : null;
+      if (apiError?.retryAfter) {
+        const now = Date.now();
+        setClock(now);
+        setLockedUntil(now + apiError.retryAfter * 1000);
+        setError('Too many unsuccessful attempts. Sign-in is temporarily locked.');
+      } else if (apiError?.status === 401) {
+        setError('We could not match those details. Check them and try again.');
+      } else {
+        setError('Secure sign-in is temporarily unavailable. Check your connection and try again.');
+      }
+    } finally {
+      setIsSigningIn(false);
     }
-
-    const nextSecurityState = applyFailedLogin(securityState);
-    storeLoginSecurityState(nextSecurityState);
-    setSecurityState(nextSecurityState);
-    setClock(Date.now());
-    if (nextSecurityState.lockedUntil) {
-      setError('Too many unsuccessful attempts. Sign-in is temporarily locked.');
-      return;
-    }
-    const attemptsRemaining = MAX_LOGIN_ATTEMPTS - nextSecurityState.failedAttempts;
-    setError(`We could not match those details. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`);
   };
 
   return (
@@ -122,7 +111,7 @@ export function LoginPage() {
                   <input
                     id="login-user-id"
                     value={loginId}
-                    onChange={event => { setLoginId(event.target.value); setError(''); }}
+                    onChange={event => { setLoginId(event.target.value); if (!isLocked) setError(''); }}
                     autoComplete="username"
                     autoCapitalize="none"
                     spellCheck={false}
@@ -149,7 +138,7 @@ export function LoginPage() {
                     id="login-pin"
                     type={showPin ? 'text' : 'password'}
                     value={pin}
-                    onChange={event => { setPin(event.target.value.replace(/\D/g, '').slice(0, 6)); setError(''); }}
+                    onChange={event => { setPin(event.target.value.replace(/\D/g, '').slice(0, 6)); if (!isLocked) setError(''); }}
                     autoComplete="current-password"
                     inputMode="numeric"
                     pattern="[0-9]*"
@@ -175,7 +164,7 @@ export function LoginPage() {
                   </p>
                 ) : error ? <p role="alert" className="text-xs font-semibold leading-relaxed text-red-600">{error}</p> : (
                   <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                    <ShieldCheck className="size-3.5 text-emerald-500" /> Your sign-in is protected in this prototype.
+                    <ShieldCheck className="size-3.5 text-emerald-500" /> Protected by encrypted server-side verification.
                   </p>
                 )}
               </div>

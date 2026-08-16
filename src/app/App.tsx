@@ -40,8 +40,10 @@ const PaymentMethodsPage = lazy(() => import('./pages/PaymentMethodsPage').then(
 const SecurityPrivacyPage = lazy(() => import('./pages/SecurityPrivacyPage').then(m => ({ default: m.SecurityPrivacyPage })));
 const HelpSupportPage = lazy(() => import('./pages/HelpSupportPage').then(m => ({ default: m.HelpSupportPage })));
 const DemoControlsPage = lazy(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
+const MerchantDashboardPage = lazy(() => import('./pages/MerchantDashboardPage').then(m => ({ default: m.MerchantDashboardPage })));
 
 import './utils/autoReminderScheduler';
+import './utils/voucherExpiryScheduler';
 
 const routes: { path: string; Page: ComponentType }[] = [
   { path: '/', Page: HomePage },
@@ -76,6 +78,7 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/wrapped', Page: WrappedPage },
   { path: '/dashboard', Page: SpendingDashboardPage },
   { path: '/admin', Page: AdminAccessPage },
+  { path: '/merchant', Page: MerchantDashboardPage },
 ];
 
 function PageLoading() {

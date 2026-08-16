@@ -1,7 +1,14 @@
 
-  # Mobile Banking App Prototype
+  # NETS Lifestyle Banking Prototype
 
-  This is a code bundle for Mobile Banking App Prototype. The original project is available at https://www.figma.com/design/UPb1XE6jPq6Xrh8UccxeFr/Mobile-Banking-App-Prototype.
+  A mobile banking prototype built around NETS: payments and bill splitting,
+  savings goals, an XP rewards store, and NETS Hangouts — all on a browser-local
+  SQLite database, with no backend. The original design bundle is available at
+  https://www.figma.com/design/UPb1XE6jPq6Xrh8UccxeFr/Mobile-Banking-App-Prototype.
+
+  **[CHANGELOG.md](CHANGELOG.md) records every change made to the prototype,
+  newest first**, along with the limitations that are deliberate rather than
+  unfinished.
 
   ## Running the code
 
@@ -15,6 +22,8 @@
   - `npm test` for regression tests covering split rounding, transaction
     classification, and Hangout vote ties.
   - `npm run build` for the production bundle.
+  - `npm run test:e2e` for the Playwright end-to-end suite, which serves a
+    production preview build rather than the dev server.
 
   ## Data storage (browser SQLite database)
 
@@ -89,6 +98,14 @@ individual feature ownership clear:
   wallet cashback writes back to the same transaction ledger used by Home.
 - **Admin Portal (`/admin`):** management users can inspect live users and transactions,
   manage merchants, and maintain partner rewards that appear in the XP Rewards Store.
+- **Savings goals:** money put into a goal leaves the spendable balance as a Goal
+  Contribution transaction and comes back as a Goal Withdrawal, so the wallet balance and
+  the goals always agree. Neither counts as merchant spending.
+- **Location awareness (`src/app/utils/geo.ts`):** hangout ideas and reward outlets are
+  ranked and filtered by great-circle distance from the customer's area. Alex Chen starts
+  in Orchard; the area can be changed in-app from either surface, and both follow it.
+  There is no device location permission — swapping `getUserArea` for the browser
+  Geolocation API is the only change a production build needs.
 - **Shared persistence:** hangout shortlists, plans, votes, reward redemptions, users,
   payments, reminders, budgets and admin data all persist in the browser sql.js database.
 - **Ledger integrity:** purchases, income, top-ups, transfers, cashback and refunds are

@@ -14,9 +14,11 @@ import {
   type SpendCategory,
 } from '../utils/spendingInsights';
 import {
-  getGoals, addGoal, contributeToGoal,
+  getGoals, addGoal, contributeToGoal, withdrawFromGoal,
   getBudgets, setBudget, deleteBudget, type Goal,
 } from '../utils/goalStorage';
+import { getWalletBalance } from '../utils/transactionStorage';
+import { celebrate } from '../utils/motionPreference';
 
 const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 const money2 = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -54,8 +56,12 @@ export function SpendingDashboardPage() {
       {/* Header */}
       <div className="bg-gradient-to-b from-[#0d2b55] to-[#1565c0] px-5 pt-12 pb-5 flex-shrink-0">
         <div className="flex items-center gap-3 mb-4">
-          <button onClick={() => navigate('/profile')} className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
-            <ArrowLeft size={18} className="text-white" />
+          <button
+            onClick={() => navigate('/profile')}
+            aria-label="Back to profile"
+            className="w-11 h-11 flex-shrink-0 rounded-full bg-white/20 flex items-center justify-center"
+          >
+            <ArrowLeft size={18} className="text-white" aria-hidden="true" />
           </button>
           <div>
             <div className="text-white font-bold text-base flex items-center gap-1.5">
@@ -242,21 +248,42 @@ function Legend({ color, label }: { color: string; label: string }) {
 
 // ─── Goals tab ────────────────────────────────────────────────────────────────
 function GoalsTab({ userId, goals }: { userId: string; goals: Goal[] }) {
-  const [contributing, setContributing] = useState<Goal | null>(null);
+  const [transferring, setTransferring] = useState<{ goal: Goal; mode: TransferMode } | null>(null);
   const [adding, setAdding] = useState(false);
   const [celebrating, setCelebrating] = useState<Goal | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const available = getWalletBalance(userId);
 
-  const contribute = (goal: Goal, amount: number) => {
-    contributeToGoal(goal.id, amount);
-    setContributing(null);
-    if (goal.current < goal.target && goal.current + amount >= goal.target) {
+  const transfer = (goal: Goal, mode: TransferMode, amount: number) => {
+    const result = mode === 'contribute'
+      ? contributeToGoal(userId, goal.id, amount)
+      : withdrawFromGoal(userId, goal.id, amount);
+
+    if (!result.ok) {
+      setProblem(result.reason ?? 'That transfer could not be completed.');
+      return;
+    }
+
+    setProblem(null);
+    setTransferring(null);
+    if (mode === 'contribute' && goal.current < goal.target && goal.current + amount >= goal.target) {
       setCelebrating(goal);
-      confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#00a94f', '#ffca28', '#1565c0', '#ec4899'] });
+      celebrate(confetti, { particleCount: 120, spread: 80, origin: { y: 0.6 }, colors: ['#00a94f', '#ffca28', '#1565c0', '#ec4899'] });
     }
   };
 
   return (
     <div className="p-4 space-y-3">
+      <div className="rounded-2xl bg-secondary p-3 text-xs text-muted-foreground">
+        Money you add to a goal moves out of your spendable balance and is held
+        against that goal. You have <span className="font-bold text-foreground">{money2(available)}</span> available.
+      </div>
+
+      <p className="sr-only" role="status" aria-live="polite">{problem ?? ''}</p>
+      {problem && (
+        <div className="rounded-2xl bg-destructive/10 p-3 text-xs font-bold text-destructive">{problem}</div>
+      )}
+
       <button onClick={() => setAdding(true)}
         className="w-full p-3.5 rounded-2xl border-2 border-dashed border-primary/40 flex items-center justify-center gap-2 text-primary font-bold text-sm">
         <Plus size={17} /> New Savings Goal
@@ -273,11 +300,27 @@ function GoalsTab({ userId, goals }: { userId: string; goals: Goal[] }) {
                 <div className="text-foreground font-bold text-sm truncate">{g.name}</div>
                 <div className="text-muted-foreground text-xs">{money2(g.current)} of {money2(g.target)}{g.deadline ? ` · ${g.deadline}` : ''}</div>
               </div>
-              {reached ? (
-                <span className="px-2.5 py-1.5 rounded-lg bg-success/10 text-success text-xs font-bold flex-shrink-0">Reached</span>
-              ) : (
-                <button onClick={() => setContributing(g)} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold flex-shrink-0">Add</button>
-              )}
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                {reached && (
+                  <span className="px-2.5 py-1.5 rounded-lg bg-success/10 text-success text-xs font-bold">Reached</span>
+                )}
+                {g.current > 0 && (
+                  <button
+                    onClick={() => { setProblem(null); setTransferring({ goal: g, mode: 'withdraw' }); }}
+                    className="min-h-11 px-3 rounded-lg bg-secondary text-foreground text-xs font-bold"
+                  >
+                    Withdraw
+                  </button>
+                )}
+                {!reached && (
+                  <button
+                    onClick={() => { setProblem(null); setTransferring({ goal: g, mode: 'contribute' }); }}
+                    className="min-h-11 px-3 rounded-lg bg-primary text-white text-xs font-bold"
+                  >
+                    Add
+                  </button>
+                )}
+              </div>
             </div>
             <div className="h-2.5 rounded-full bg-secondary overflow-hidden">
               <motion.div className="h-full rounded-full" style={{ background: g.color }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.7 }} />
@@ -294,8 +337,15 @@ function GoalsTab({ userId, goals }: { userId: string; goals: Goal[] }) {
         );
       })}
 
-      {contributing && <ContributeModal goal={contributing} onClose={() => setContributing(null)}
-        onConfirm={(amt) => contribute(contributing, amt)} />}
+      {transferring && (
+        <TransferModal
+          goal={transferring.goal}
+          mode={transferring.mode}
+          available={available}
+          onClose={() => { setTransferring(null); setProblem(null); }}
+          onConfirm={(amount) => transfer(transferring.goal, transferring.mode, amount)}
+        />
+      )}
       {adding && <AddGoalModal onClose={() => setAdding(false)}
         onAdd={(g) => { addGoal(userId, g); setAdding(false); }} />}
       {celebrating && <GoalReachedModal goal={celebrating} onClose={() => setCelebrating(null)} />}
@@ -323,29 +373,82 @@ function GoalReachedModal({ goal, onClose }: { goal: Goal; onClose: () => void }
   );
 }
 
-function ContributeModal({ goal, onClose, onConfirm }: { goal: Goal; onClose: () => void; onConfirm: (amt: number) => void }) {
+type TransferMode = 'contribute' | 'withdraw';
+
+function TransferModal({ goal, mode, available, onClose, onConfirm }: {
+  goal: Goal;
+  mode: TransferMode;
+  available: number;
+  onClose: () => void;
+  onConfirm: (amount: number) => void;
+}) {
   const [amount, setAmount] = useState('');
-  const quick = [50, 100, 200, 500];
-  const remaining = goal.target - goal.current;
+  const isContribute = mode === 'contribute';
+  const room = goal.target - goal.current;
+  // The most that can move in this direction: the wallet and the goal's
+  // remaining room when paying in, the goal's balance when taking out.
+  const ceiling = isContribute ? Math.min(available, room) : goal.current;
+  const quick = [50, 100, 200, 500].filter(option => option <= ceiling);
+
+  const value = Number(amount);
+  const error =
+    amount === '' ? null
+    : !Number.isFinite(value) || value <= 0 ? 'Enter an amount greater than zero.'
+    : isContribute && value > available ? `You only have ${money2(available)} available in your wallet.`
+    : isContribute && value > room ? `Only ${money2(room)} left to reach this goal.`
+    : !isContribute && value > goal.current ? `This goal only holds ${money2(goal.current)}.`
+    : null;
+  const canSubmit = value > 0 && error === null;
+
   return (
     <div className="fixed inset-0 z-[60] flex items-end" style={{ maxWidth: 390, margin: '0 auto' }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <motion.div className="relative w-full bg-white rounded-t-3xl p-5 pb-8" initial={{ y: '100%' }} animate={{ y: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}>
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2"><span className="text-2xl">{goal.icon}</span><div className="font-bold text-foreground">{goal.name}</div></div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center"><X size={16} /></button>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl" aria-hidden="true">{goal.icon}</span>
+            <div>
+              <div className="font-bold text-foreground">{goal.name}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {isContribute ? 'Move money into this goal' : 'Return money to your wallet'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label={isContribute ? 'Cancel contribution' : 'Cancel withdrawal'}
+            className="w-11 h-11 rounded-full bg-secondary flex items-center justify-center"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
-        <div className="text-muted-foreground text-xs mb-3">{money2(remaining)} left to reach your goal</div>
-        <div className="grid grid-cols-4 gap-2 mb-3">
-          {quick.map((q) => (
-            <button key={q} onClick={() => setAmount(String(q))} className={`py-2 rounded-xl text-sm font-bold ${amount === String(q) ? 'bg-primary text-white' : 'bg-secondary text-foreground'}`}>${q}</button>
-          ))}
+
+        <div className="text-muted-foreground text-xs mb-3">
+          {isContribute
+            ? `${money2(room)} left to reach your goal · ${money2(available)} available in your wallet`
+            : `${money2(goal.current)} saved in this goal`}
         </div>
+
+        {quick.length > 0 && (
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            {quick.map((option) => (
+              <button key={option} onClick={() => setAmount(String(option))}
+                className={`min-h-11 rounded-xl text-sm font-bold ${amount === String(option) ? 'bg-primary text-white' : 'bg-secondary text-foreground'}`}>
+                ${option}
+              </button>
+            ))}
+          </div>
+        )}
+
         <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="Custom amount"
-          className="w-full bg-secondary rounded-xl px-4 py-3 text-sm outline-none mb-3" />
-        <button onClick={() => { const a = Number(amount); if (a > 0) onConfirm(a); }} disabled={!(Number(amount) > 0)}
-          className="w-full py-3.5 rounded-xl bg-primary text-white font-bold text-sm disabled:opacity-30">
-          Contribute {Number(amount) > 0 ? money2(Number(amount)) : ''}
+          aria-label="Amount" aria-invalid={error !== null}
+          className="w-full bg-secondary rounded-xl px-4 py-3 text-sm outline-none" />
+
+        <p role="alert" className="mt-1 min-h-4 text-[11px] font-bold text-destructive">{error ?? ''}</p>
+
+        <button onClick={() => { if (canSubmit) onConfirm(value); }} disabled={!canSubmit}
+          className="mt-2 w-full py-3.5 rounded-xl bg-primary text-white font-bold text-sm disabled:opacity-30">
+          {isContribute ? 'Contribute' : 'Withdraw'} {value > 0 ? money2(value) : ''}
         </button>
       </motion.div>
     </div>

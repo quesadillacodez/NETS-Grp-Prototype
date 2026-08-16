@@ -1,4 +1,4 @@
-import { query, run } from './db';
+import { query, queryOne, run } from './db';
 import { resolveSpendCategory, type SpendCategory } from './spendingInsights';
 import {
   classifyTransaction, transactionReference, TRANSACTION_TYPE_META,
@@ -111,6 +111,24 @@ export function updateTransaction(id: number, updates: Partial<Transaction>): vo
 export function clearAllTransactions(): void {
   run('DELETE FROM transactions');
   notifyUpdated();
+}
+
+// ─── Wallet balance ──────────────────────────────────────────────────────────
+// Every account starts from the same opening balance and the wallet is the sum
+// of its transactions. This lives here, and only here, so a new money movement
+// cannot be added without the balance following it — previously the constant
+// and the sum were repeated in four screens, and a savings-goal contribution
+// updated the goal without ever debiting the wallet.
+
+export const OPENING_BALANCE = 2500.00;
+
+export function walletBalanceFrom(transactions: Transaction[]): number {
+  return OPENING_BALANCE + transactions.reduce((sum, tx) => sum + tx.amount, 0);
+}
+
+export function getWalletBalance(userId: string): number {
+  const row = queryOne('SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE user_id = ?', [userId]);
+  return OPENING_BALANCE + Number(row?.total ?? 0);
 }
 
 export function formatDateForTransaction(): string {

@@ -292,3 +292,17 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   PRIMARY KEY (user_id, key),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- ---------- reward_promotions ----------
+CREATE TABLE IF NOT EXISTS reward_promotions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_id   INTEGER NOT NULL,
+  title       TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  placement   TEXT NOT NULL DEFAULT 'featured',
+  weekly_fee  REAL NOT NULL DEFAULT 0,
+  starts_at   INTEGER NOT NULL,
+  ends_at     INTEGER NOT NULL,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER
+);

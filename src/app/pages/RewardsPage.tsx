@@ -1,10 +1,10 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
-  AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Gift, History, LockKeyhole,
-  MapPin, Navigation, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
+  AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Flame, Gift, History, LockKeyhole,
+  MapPin, Megaphone, Navigation, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
@@ -33,6 +33,8 @@ import {
 } from '../utils/geo';
 import { useAppEvents } from '../utils/useAppEvents';
 import { LocationSheet } from '../components/LocationPicker';
+import { getLivePromotions, recordImpressions } from '../utils/promotionStorage';
+import { getRedemptionCounts } from '../utils/merchantInsights';
 
 type RewardsTab = 'overview' | 'store' | 'wallet' | 'history';
 
@@ -431,17 +433,50 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
   const userArea = getUserArea(userId);
   const term = search.trim().toLowerCase();
 
+  // Paid placements and redemption counts are read once per render of the
+  // store. A promoted reward is pinned above the listing and labelled; it keeps
+  // its real XP price, its real distance and its real lock state, because a
+  // merchant is buying position, not a different set of facts.
+  const live = getLivePromotions();
+  const promotedIds = new Set(live.map(promotion => promotion.rewardId));
+  const spotlight = live.find(promotion => promotion.placement === 'spotlight') ?? null;
+  const redemptionCounts = getRedemptionCounts();
+
+  useEffect(() => {
+    recordImpressions(live.map(promotion => promotion.id));
+    // Counted once per visit to the store, keyed on which placements are live,
+    // so re-rendering the list does not inflate a merchant's report.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live.map(promotion => promotion.id).join(',')]);
+
   // Distance is attached once, then used for both the filter and the labels.
   const catalog = getRewardsCatalog()
     .map(reward => ({ reward, proximity: proximityTo(userId, reward.area) }));
 
-  const filtered = catalog
+  const matching = catalog
     .filter(({ reward, proximity }) =>
       (category === 'All' || reward.category === category) &&
       (!term || `${reward.title} ${reward.merchant} ${reward.tags.join(' ')}`.toLowerCase().includes(term)) &&
       // Wallet cashback has no outlet, so it is not a "near me" result.
       (!nearMeOnly || isWithinRadius(proximity, DEFAULT_NEARBY_RADIUS_KM)))
     .sort((a, b) => (nearMeOnly ? byDistance(a.proximity, b.proximity) : 0));
+
+  // Promoted rewards lead the list, in the order NETS sold the slots. They are
+  // filtered like everything else — a paid slot cannot force a reward into a
+  // search or a radius it does not belong in.
+  const promotedOrder = live.map(promotion => promotion.rewardId);
+  const filtered = [...matching].sort((a, b) => {
+    const rankA = promotedOrder.indexOf(a.reward.id);
+    const rankB = promotedOrder.indexOf(b.reward.id);
+    if (rankA === -1 && rankB === -1) return 0;
+    if (rankA === -1) return 1;
+    if (rankB === -1) return -1;
+    return rankA - rankB;
+  });
+
+  const spotlightEntry = spotlight
+    ? matching.find(entry => entry.reward.id === spotlight.rewardId) ?? null
+    : null;
 
   const nearbyCount = catalog.filter(entry => isWithinRadius(entry.proximity, DEFAULT_NEARBY_RADIUS_KM)).length;
 
@@ -480,6 +515,32 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
 
       <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto pb-1">{(['All', 'Cashback', 'Vouchers', 'Partner Deals'] as const).map(item => <button key={item} onClick={() => setCategory(item)} aria-pressed={category === item} className={`min-h-11 whitespace-nowrap rounded-full px-3 text-xs font-bold ${category === item ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>{item}</button>)}</div>
 
+      {spotlightEntry && (
+        <button
+          onClick={() => onSelect(spotlightEntry.reward)}
+          // Named explicitly: the same reward also appears in the listing
+          // below, and a screen reader should be able to tell the banner and
+          // the card apart rather than hearing the reward announced twice.
+          aria-label={`Sponsored spotlight: ${spotlightEntry.reward.title} from ${spotlightEntry.reward.merchant}, ${spotlightEntry.reward.xpCost} XP`}
+          className="mb-3 flex w-full items-center gap-3 rounded-2xl border-2 border-primary bg-primary/5 p-3 text-left"
+        >
+          <div className="grid h-14 w-14 flex-shrink-0 place-items-center rounded-2xl bg-white text-3xl" aria-hidden="true">
+            {spotlightEntry.reward.icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white">
+              <Megaphone size={9} aria-hidden="true" /> Sponsored
+            </span>
+            <p className="truncate text-xs font-black text-foreground">{spotlightEntry.reward.title}</p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              {spotlightEntry.reward.merchant}
+              {spotlightEntry.proximity.label ? ` · ${spotlightEntry.proximity.label}` : ''}
+            </p>
+          </div>
+          <span className="flex-shrink-0 text-xs font-black text-primary">{spotlightEntry.reward.xpCost} XP</span>
+        </button>
+      )}
+
       <p className="mb-2 text-xs text-muted-foreground" aria-live="polite">
         {filtered.length} {filtered.length === 1 ? 'reward' : 'rewards'}
         {nearMeOnly ? ` near ${userArea}` : ''}
@@ -487,17 +548,29 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
 
       <div className="grid grid-cols-2 gap-3">{filtered.map(({ reward, proximity }) => {
         const locked = currentXP < reward.xpCost;
+        const promoted = promotedIds.has(reward.id);
+        const redeemed = redemptionCounts.get(reward.id) ?? 0;
         return (
-          <button key={reward.id} onClick={() => onSelect(reward)} className="rounded-2xl border border-border bg-white p-3 text-left shadow-sm">
+          <button key={reward.id} onClick={() => onSelect(reward)} className={`rounded-2xl border bg-white p-3 text-left shadow-sm ${promoted ? 'border-primary' : 'border-border'}`}>
             <div className="mb-3 flex items-start justify-between">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-xl" aria-hidden="true">{reward.icon}</div>
               {locked && <LockKeyhole size={14} className="text-muted-foreground" aria-hidden="true" />}
             </div>
+            {promoted && (
+              <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-primary">
+                <Megaphone size={8} aria-hidden="true" /> Sponsored
+              </span>
+            )}
             <p className="text-[10px] font-bold text-muted-foreground">{reward.merchant}</p>
             <h3 className="mt-0.5 min-h-8 text-xs font-black leading-tight">{reward.title}</h3>
             {proximity.label && (
               <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-primary">
                 <Navigation size={9} aria-hidden="true" /> {proximity.label}
+              </p>
+            )}
+            {redeemed > 0 && (
+              <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-[#a86400]">
+                <Flame size={9} aria-hidden="true" /> Redeemed {redeemed}×
               </p>
             )}
             <div className="mt-3 flex items-center justify-between">
@@ -507,6 +580,13 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
           </button>
         );
       })}</div>
+
+      {live.length > 0 && (
+        <p className="mt-3 text-center text-[10px] leading-relaxed text-muted-foreground">
+          Sponsored rewards are paid placements by the merchant. Their XP price, distance and
+          availability are exactly the same as every other reward.
+        </p>
+      )}
 
       {filtered.length === 0 && (
         <div className="mt-14 text-center">
@@ -673,8 +753,12 @@ function HistoryView({ userId, onOpen }: { userId: string; onOpen: (redemption: 
 }
 
 export function RewardsPage() {
+  const [searchParams] = useSearchParams();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
-  const [tab, setTab] = useState<RewardsTab>('overview');
+  const [tab, setTab] = useState<RewardsTab>(() => {
+    const requested = searchParams.get('tab');
+    return requested === 'store' || requested === 'wallet' || requested === 'history' ? requested : 'overview';
+  });
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedVoucher, setSelectedVoucher] = useState<RewardRedemption | null>(null);
   const [receipt, setReceipt] = useState<RewardRedemption | null>(null);

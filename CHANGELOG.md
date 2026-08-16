@@ -5,6 +5,58 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Merchant insights and paid placements — `2fb7e08`
+
+The rewards store had a catalogue and no other side to it. Merchants got nothing
+back from taking part, and NETS earned nothing from running it.
+
+**What a merchant learns** — a new **Rewards** tab in the management portal
+reports, per merchant, what the ledger already knows:
+- Sales, revenue, average basket, busiest hour and day.
+- How many customers bought more than once, and what their sales are
+  categorised as.
+- Which of its rewards customers actually redeem, ranked.
+- **Of the customers who redeemed a voucher, how many came back and paid here** —
+  and how many of those had never bought there before. That is the only real
+  evidence a reward did its job, and it is computed from timestamps rather than
+  asserted.
+
+Nothing is stored. Every figure is derived from the transactions and redemptions
+tables when it is read, so the portal cannot show a merchant a number the
+customer app would contradict. A merchant with no activity says so rather than
+showing zeroes that look like a broken screen.
+
+**What NETS sells** — merchants buy position in the store. **Featured** ($40/wk)
+pins the reward above the listing; **Spotlight** ($90/wk) adds the banner at the
+top. Each booking has a window and a report: impressions, attributed
+redemptions, the fee prorated to the days actually run, and the cost per
+redemption. Three rules live in storage rather than in the UI:
+- At most three paid slots at once, counted across the whole booked window
+  rather than just today — so a booking cannot slip in by starting later.
+- One reward cannot hold two overlapping placements.
+- Only one merchant holds the spotlight at a time, because there is one banner
+  and a second buyer would pay the higher rate for nothing.
+
+Placements expire on their own: status is derived from the window every time it
+is read, the same rule that governs voucher expiry.
+
+**What the customer sees** — promoted rewards lead the store and every one is
+labelled **Sponsored**, with a line explaining what that means. A paid slot buys
+position and nothing else: the XP price, the distance and the locked state of a
+reward the customer cannot afford are all untouched, and a promoted reward is
+still filtered out by search or by the *Near me* radius when it does not belong.
+Cards also show how often a reward has been redeemed — the same signal the
+portal ranks by.
+
+The presentation scenario now seeds reward history and a live placement, so the
+insights, the ranking and the sponsored card all have something real to show the
+moment a demo loads.
+
+Covered by 42 unit tests over the insight and placement rules, and 10 end-to-end
+tests over the portal, the store, and the loop between them.
+
+---
+
 ## A working card carousel and editable Quick Actions — `a77377d`
 
 Two things on Home only looked finished: the three dots under the vCashCard

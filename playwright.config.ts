@@ -27,14 +27,15 @@ const launchOptions = executablePath ? { executablePath } : {};
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 90_000,
-  // Shared CI runners are noticeably weaker than a dev machine, and every
-  // observed CI-only failure so far has been a plain timeout waiting on UI
-  // after an action (not a logic mismatch) -- give CI more headroom.
+  // Shared CI runners need more headroom, while server-backed PIN mutation
+  // requires serial execution to keep credentials deterministic.
   expect: { timeout: process.env.CI ? 25_000 : 15_000 },
-  fullyParallel: true,
+  // Authentication and PIN recovery are intentionally server-backed. Keep the
+  // suite serial so a credential mutation cannot race another sign-in.
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  workers: 1,
   reporter: process.env.CI
     ? [['github'], ['html', { open: 'never' }], ['list']]
     : [['list']],
@@ -67,5 +68,14 @@ export default defineConfig({
     timeout: 180_000,
     stdout: 'ignore',
     stderr: 'pipe',
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      RESET_DEMO_DATA: 'true',
+      NETS_DATA_FILE: 'tmp/playwright-auth.json',
+      EXPOSE_DEMO_OTP: 'true',
+      VITE_DISABLE_CLOUD_SYNC: 'true',
+      NETS_SERVE_BUILD: 'true',
+    },
   },
 });

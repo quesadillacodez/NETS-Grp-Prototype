@@ -11,6 +11,10 @@ const PROFILE_PAGES = [
 ];
 
 test.describe('Profile', () => {
+  test.afterEach(async ({ request }) => {
+    await request.post('/api/test/reset', { headers: { 'X-NETS-CSRF': '1' } });
+  });
+
   for (const { button, heading } of PROFILE_PAGES) {
     test(`"${heading}" opens a real page`, async ({ page }) => {
       await signInAsCustomer(page, USERS.alex);
@@ -86,6 +90,7 @@ test.describe('Profile', () => {
     await page.locator('#login-pin').fill('135791');
     await page.getByRole('button', { name: 'Sign in securely' }).click();
     await expect(page.getByText(`Welcome back, ${USERS.sarah.firstName}!`)).toBeVisible();
+
   });
 
   test('an issue can be reported and gets a case reference', async ({ page }) => {

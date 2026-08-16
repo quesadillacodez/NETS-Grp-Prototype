@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NETS Pay Together">
+  <rect width="512" height="512" fill="#041b42"/>
+  <circle cx="256" cy="256" r="186" fill="#0053a0"/>
+  <path d="M150 324V188h45l65 79v-79h55v136h-43l-67-79v79z" fill="#fff"/>
+  <rect x="325" y="188" width="43" height="136" rx="14" fill="#19c37d"/>
+</svg>

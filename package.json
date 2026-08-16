@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite",
-    "preview": "vite preview --port 4173 --strictPort",
+    "dev": "node server/index.mjs",
+    "dev:test": "node server/index.mjs",
+    "start": "node server/index.mjs",
+    "preview": "node server/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",

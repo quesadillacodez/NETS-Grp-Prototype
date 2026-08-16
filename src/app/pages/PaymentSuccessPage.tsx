@@ -11,6 +11,7 @@ import { payHangout } from '../utils/hangoutStorage';
 import { useRequiredState } from '../utils/useRequiredState';
 import { resolvePaymentCategory, type PaymentFlowContext, type SplitParticipant } from '../utils/paymentFlow';
 import { celebrate } from '../utils/motionPreference';
+import { recordMerchantSale } from '../utils/merchantInsightStorage';
 
 interface PaymentSuccessState extends Record<string, unknown>, PaymentFlowContext {
   participants: SplitParticipant[];
@@ -46,6 +47,13 @@ export function PaymentSuccessPage() {
       kind: 'purchase',
       paymentId,
     }, currentUser.id);
+    recordMerchantSale({
+      merchantName,
+      itemName: state?.reference,
+      amount,
+      userId: currentUser.id,
+      paymentId,
+    });
 
     if (friends.length === 0) {
       markPaymentProcessed(paymentId);

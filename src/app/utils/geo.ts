@@ -108,8 +108,55 @@ const DEMO_USER_AREAS: Record<string, string> = {
   '1': 'Orchard', // Alex Chen
 };
 
+/**
+ * Areas offered in the location picker, roughly ordered from the city centre
+ * outwards. `AREA_COORDINATES` holds a few extra aliases used only for matching
+ * catalogue labels, which is why this list is explicit rather than derived.
+ */
+export const SELECTABLE_AREAS: string[] = [
+  'Orchard', 'Somerset', 'Dhoby Ghaut', 'River Valley', 'Bras Basah',
+  'Clarke Quay', 'Bugis', 'Kampong Glam', 'Chinatown', 'Tiong Bahru',
+  'Downtown', 'Raffles Place', 'Marina Bay Sands', 'Marina South',
+  'Holland Village', 'Bukit Timah', 'Toa Payoh', 'Serangoon', 'Ang Mo Kio',
+  'Clementi', 'Jurong East', 'Bedok', 'Tampines', 'Punggol', 'Woodlands',
+  'Mandai', 'Sentosa Island',
+];
+
+const AREA_STORAGE_PREFIX = 'nets-user-area:';
+
+function storedArea(userId: string): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  const value = localStorage.getItem(AREA_STORAGE_PREFIX + userId);
+  // Ignore anything we can no longer place on the map.
+  return value && resolveArea(value).coordinates ? value : null;
+}
+
 export function getUserArea(userId: string): string {
-  return DEMO_USER_AREAS[userId] ?? DEFAULT_USER_AREA;
+  return storedArea(userId) ?? DEMO_USER_AREAS[userId] ?? DEFAULT_USER_AREA;
+}
+
+/** Move the customer to a different area. Fires `locationChanged`. */
+export function setUserArea(userId: string, area: string): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(AREA_STORAGE_PREFIX + userId, area);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('locationChanged'));
+  }
+}
+
+/** Put the customer back where the demo starts them. */
+export function resetUserArea(userId: string): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(AREA_STORAGE_PREFIX + userId);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('locationChanged'));
+  }
+}
+
+export function isDefaultArea(userId: string): boolean {
+  return storedArea(userId) === null;
 }
 
 export function getUserCoordinates(userId: string): Coordinates {

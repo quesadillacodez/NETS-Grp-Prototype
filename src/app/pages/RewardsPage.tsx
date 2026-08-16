@@ -32,6 +32,7 @@ import {
   DEFAULT_NEARBY_RADIUS_KM, byDistance, getUserArea, isWithinRadius, proximityTo,
 } from '../utils/geo';
 import { useAppEvents } from '../utils/useAppEvents';
+import { LocationSheet } from '../components/LocationPicker';
 
 type RewardsTab = 'overview' | 'store' | 'wallet' | 'history';
 
@@ -119,7 +120,7 @@ function RewardDetail({ reward, userId, currentXP, onRedeem, onClose }: {
     <OverlaySheet onClose={onClose}>
       <div className="px-5 pb-8">
         <div className="mb-5 flex items-start justify-between">
-          <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-sm font-black text-primary">{reward.icon}</div><div><p className="text-xs font-bold text-muted-foreground">{reward.merchant}</p><h2 className="max-w-[245px] text-xl font-black leading-tight">{reward.title}</h2></div></div>
+          <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-3xl" aria-hidden="true">{reward.icon}</div><div><p className="text-xs font-bold text-muted-foreground">{reward.merchant}</p><h2 className="max-w-[245px] text-xl font-black leading-tight">{reward.title}</h2></div></div>
           <button onClick={onClose} aria-label="Close reward details" className="grid h-11 w-11 place-items-center rounded-full bg-secondary"><X size={18} aria-hidden="true" /></button>
         </div>
         <div className="mb-4 flex items-center justify-between rounded-2xl bg-[#1e2a4a] p-4 text-white"><div><p className="text-xs text-white/65">Reward cost</p><p className="text-2xl font-black">{reward.xpCost.toLocaleString()} XP</p></div><Gift size={30} className="text-[#ffca28]" /></div>
@@ -418,10 +419,11 @@ function Overview({ userId, onTab }: { userId: string; onTab: (tab: RewardsTab) 
   );
 }
 
-function StoreView({ userId, currentXP, onSelect }: {
+function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
   userId: string;
   currentXP: number;
   onSelect: (reward: Reward) => void;
+  onChangeLocation: () => void;
 }) {
   const [category, setCategory] = useState<RewardCategory | 'All'>('All');
   const [search, setSearch] = useState('');
@@ -468,6 +470,14 @@ function StoreView({ userId, currentXP, onSelect }: {
         </span>
       </button>
 
+      <button
+        onClick={onChangeLocation}
+        aria-label={`Change your location — currently ${userArea}`}
+        className="mb-2 flex min-h-11 w-full items-center justify-center gap-1 text-[11px] font-bold text-primary"
+      >
+        <MapPin size={12} aria-hidden="true" /> You're in {userArea} · Change
+      </button>
+
       <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto pb-1">{(['All', 'Cashback', 'Vouchers', 'Partner Deals'] as const).map(item => <button key={item} onClick={() => setCategory(item)} aria-pressed={category === item} className={`min-h-11 whitespace-nowrap rounded-full px-3 text-xs font-bold ${category === item ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>{item}</button>)}</div>
 
       <p className="mb-2 text-xs text-muted-foreground" aria-live="polite">
@@ -480,7 +490,7 @@ function StoreView({ userId, currentXP, onSelect }: {
         return (
           <button key={reward.id} onClick={() => onSelect(reward)} className="rounded-2xl border border-border bg-white p-3 text-left shadow-sm">
             <div className="mb-3 flex items-start justify-between">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-xs font-black text-primary">{reward.icon}</div>
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-xl" aria-hidden="true">{reward.icon}</div>
               {locked && <LockKeyhole size={14} className="text-muted-foreground" aria-hidden="true" />}
             </div>
             <p className="text-[10px] font-bold text-muted-foreground">{reward.merchant}</p>
@@ -670,10 +680,11 @@ export function RewardsPage() {
   const [receipt, setReceipt] = useState<RewardRedemption | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
   const navigate = useNavigate();
   const [, setVersion] = useState(0);
   const refresh = () => { setCurrentUser(getCurrentUser()); setVersion(version => version + 1); };
-  useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus'], refresh);
+  useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus', 'locationChanged'], refresh);
   const stats = getXPStats(currentUser.id);
 
   const confirmRedemption = () => {
@@ -720,12 +731,24 @@ export function RewardsPage() {
       </header>
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
         {tab === 'overview' && <Overview userId={currentUser.id} onTab={setTab} />}
-        {tab === 'store' && <StoreView userId={currentUser.id} currentXP={stats.currentXP} onSelect={setSelectedReward} />}
+        {tab === 'store' && (
+          <StoreView
+            userId={currentUser.id}
+            currentXP={stats.currentXP}
+            onSelect={setSelectedReward}
+            onChangeLocation={() => setShowLocationPicker(true)}
+          />
+        )}
         {tab === 'wallet' && <WalletView userId={currentUser.id} onOpen={openVoucher} />}
         {tab === 'history' && <HistoryView userId={currentUser.id} onOpen={openVoucher} />}
       </main>
       <BottomNav />
       <AccountSwitcher isOpen={showAccountSwitcher} onClose={() => setShowAccountSwitcher(false)} />
+      <AnimatePresence>
+        {showLocationPicker && (
+          <LocationSheet userId={currentUser.id} onClose={() => setShowLocationPicker(false)} />
+        )}
+      </AnimatePresence>
       <AnimatePresence>{selectedReward && <RewardDetail reward={selectedReward} userId={currentUser.id} currentXP={stats.currentXP} onClose={() => setSelectedReward(null)} onRedeem={confirmRedemption} />}</AnimatePresence>
       <AnimatePresence>
         {receipt && (

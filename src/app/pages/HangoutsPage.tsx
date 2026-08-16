@@ -33,8 +33,9 @@ import {
 import { getAllUsers, getCurrentUser } from '../utils/userStorage';
 import {
   DEFAULT_NEARBY_RADIUS_KM, NEARBY_RADIUS_OPTIONS_KM, byDistance, getUserArea,
-  isWithinRadius, proximityTo, type Proximity,
+  isWithinRadius, proximityTo,
 } from '../utils/geo';
+import { LocationBanner, LocationSheet } from '../components/LocationPicker';
 import { createPaymentId } from '../utils/paymentFlow';
 import { useAppEvents } from '../utils/useAppEvents';
 
@@ -459,6 +460,9 @@ export function HangoutsPage() {
   const [plans, setPlans] = useState(() => getHangoutsForUser(currentUser.id));
   const [tab, setTab] = useState<'discover' | 'nearby' | 'favourites' | 'plans'>('discover');
   const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_NEARBY_RADIUS_KM);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  // Bumped whenever the customer moves, so the distance lists recompute.
+  const [locationVersion, setLocationVersion] = useState(0);
   const [category, setCategory] = useState<ActivityCategory | 'all'>('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Activity | null>(null);
@@ -475,6 +479,7 @@ export function HangoutsPage() {
     setPlans(getHangoutsForUser(user.id));
   };
   useAppEvents(['userSwitched', 'savedActivitiesUpdated', 'hangoutsUpdated', 'activitiesUpdated', 'databaseReady', 'focus'], refresh);
+  useAppEvents(['locationChanged', 'userSwitched'], () => setLocationVersion(version => version + 1));
 
   const visibleActivities = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -494,7 +499,7 @@ export function HangoutsPage() {
     () => activities
       .map(activity => ({ activity, proximity: proximityTo(currentUser.id, activity.location) }))
       .sort((a, b) => byDistance(a.proximity, b.proximity)),
-    [activities, currentUser.id],
+    [activities, currentUser.id, locationVersion],
   );
   const proximityById = useMemo(
     () => new Map(withDistance.map(entry => [entry.activity.id, entry.proximity])),
@@ -504,7 +509,7 @@ export function HangoutsPage() {
     () => withDistance.filter(entry => isWithinRadius(entry.proximity, radiusKm)),
     [withDistance, radiusKm],
   );
-  const userArea = getUserArea(currentUser.id);
+  const userArea = useMemo(() => getUserArea(currentUser.id), [currentUser.id, locationVersion]);
   const distanceLabelFor = (activity: Activity): string | null =>
     proximityById.get(activity.id)?.label ?? null;
   const selectedPlan = selectedPlanId ? plans.find(plan => plan.id === selectedPlanId) ?? null : null;
@@ -558,16 +563,12 @@ export function HangoutsPage() {
         </>
       ) : tab === 'nearby' ? (
         <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
-          <div className="mb-3 flex items-center gap-2 rounded-2xl bg-primary/5 p-3">
-            <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-primary text-white">
-              <Navigation size={17} aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-black text-foreground">Hangouts near you</p>
-              <p className="text-[11px] text-muted-foreground">
-                Based on your location · <span className="font-bold text-primary">{userArea}</span>
-              </p>
-            </div>
+          <div className="mb-3">
+            <LocationBanner
+              userId={currentUser.id}
+              title="Hangouts near you"
+              onOpen={() => setShowLocationPicker(true)}
+            />
           </div>
 
           <div className="mb-3">
@@ -659,6 +660,11 @@ export function HangoutsPage() {
 
       <BottomNav />
       <AccountSwitcher isOpen={showAccountSwitcher} onClose={() => setShowAccountSwitcher(false)} />
+      <AnimatePresence>
+        {showLocationPicker && (
+          <LocationSheet userId={currentUser.id} onClose={() => setShowLocationPicker(false)} />
+        )}
+      </AnimatePresence>
       <AnimatePresence>{selected && <ActivityDetail activity={selected} saved={savedIds.includes(selected.id)} onSave={() => save(selected.id)} onPlan={() => startPlan([selected.id, ...savedIds])} onClose={() => setSelected(null)} />}</AnimatePresence>
       <AnimatePresence>{showCreate && <CreateHangoutSheet initialIds={createSeed} activities={activities} ownerId={currentUser.id} onClose={() => setShowCreate(false)} onCreated={id => { setShowCreate(false); refresh(); setTab('plans'); setSelectedPlanId(id); }} />}</AnimatePresence>
       <AnimatePresence>{selectedPlan && <PlanDetail plan={selectedPlan} currentUserId={currentUser.id} onClose={() => setSelectedPlanId(null)} onRefresh={refresh} onPay={(plan, activity) => navigate('/scan', { state: {

@@ -65,6 +65,62 @@ test.describe('Nearby Hangouts', () => {
   });
 });
 
+test.describe('Changing your location', () => {
+  test('moving to another area re-ranks the Hangout suggestions', async ({ page }) => {
+    await signInAsCustomer(page, USERS.alex);
+    await tapNav(page, 'Hangouts');
+    await page.getByRole('button', { name: 'Near you' }).click();
+    await page.getByRole('button', { name: '10 km' }).click();
+
+    const firstFromOrchard = await page.getByRole('heading', { level: 3 }).first().innerText();
+
+    // Move across the island.
+    await page.getByRole('button', { name: /Change your location/ }).click();
+    await expect(page.getByRole('heading', { name: 'Set your location' })).toBeVisible();
+    await page.getByRole('button', { name: /^Mandai/ }).click();
+
+    // The banner follows, and so does the ranking.
+    await expect(page.getByText('Mandai', { exact: true }).first()).toBeVisible();
+    const firstFromMandai = await page.getByRole('heading', { level: 3 }).first().innerText();
+    expect(firstFromMandai).not.toBe(firstFromOrchard);
+    // The Night Safari is the one thing actually in Mandai.
+    expect(firstFromMandai).toContain('Night Safari');
+  });
+
+  test('the location can be searched and reset', async ({ page }) => {
+    await signInAsCustomer(page, USERS.alex);
+    await tapNav(page, 'Hangouts');
+    await page.getByRole('button', { name: 'Near you' }).click();
+
+    await page.getByRole('button', { name: /Change your location/ }).click();
+    await page.getByLabel('Search an area').fill('tamp');
+    await page.getByRole('button', { name: /^Tampines/ }).click();
+    await expect(page.getByText('Tampines', { exact: true }).first()).toBeVisible();
+
+    // Reset puts Alex back in Orchard.
+    await page.getByRole('button', { name: /Change your location/ }).click();
+    await page.getByRole('button', { name: /Reset to my usual area/ }).click();
+    await expect(page.getByText('Orchard', { exact: true }).first()).toBeVisible();
+  });
+
+  test('the location set in Hangouts also drives the rewards store', async ({ page }) => {
+    await signInAsCustomer(page, USERS.alex);
+    await tapNav(page, 'Hangouts');
+    await page.getByRole('button', { name: 'Near you' }).click();
+    await page.getByRole('button', { name: /Change your location/ }).click();
+    await page.getByRole('button', { name: /^Ang Mo Kio/ }).click();
+
+    await tapNav(page, 'Rewards');
+    await page.getByRole('button', { name: 'Store', exact: true }).click();
+
+    // The campus food court is on Alex's doorstep now, and Orchard is not.
+    await expect(page.getByText(/outlets within 5 km of Ang Mo Kio/)).toBeVisible();
+    await page.getByRole('button', { name: /Near me/ }).click();
+    await expect(page.getByText('NYP Campus Food Court')).toBeVisible();
+    await expect(page.getByText('LiHO TEA')).toHaveCount(0);
+  });
+});
+
 test.describe('Nearby rewards', () => {
   test('the store shows how far each outlet is', async ({ page }) => {
     await signInAsCustomer(page, USERS.alex);
@@ -94,6 +150,17 @@ test.describe('Nearby rewards', () => {
     for (const distance of await distancesOnScreen(page)) {
       expect(distance).toBeLessThanOrEqual(5);
     }
+  });
+
+  test('rewards are illustrated with an emoji that fits the merchant', async ({ page }) => {
+    await signInAsCustomer(page, USERS.alex);
+    await tapNav(page, 'Rewards');
+    await page.getByRole('button', { name: 'Store', exact: true }).click();
+
+    await expect(page.getByText('🧋')).toBeVisible();  // LiHO bubble tea
+    await expect(page.getByText('☕')).toBeVisible();  // Kopitiam coffee
+    await expect(page.getByText('🍗')).toBeVisible();  // chicken rice
+    await expect(page.getByText('💵').first()).toBeVisible();  // wallet cashback
   });
 
   test('a reward detail names the outlet and its distance', async ({ page }) => {

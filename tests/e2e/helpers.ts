@@ -80,6 +80,15 @@ export async function signOut(page: Page): Promise<void> {
 }
 
 /**
+ * Sign out of the management portal, which has its own control rather than the
+ * customer app's Profile screen.
+ */
+export async function signOutOfAdmin(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Sign out of the management portal' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in securely' })).toBeVisible();
+}
+
+/**
  * Put the app into the repeatable presentation state via the in-app Demo
  * Controls, so a test that needs existing bills, repayments and plans does not
  * have to click through creating them first.

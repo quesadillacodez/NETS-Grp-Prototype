@@ -161,6 +161,24 @@ CREATE INDEX IF NOT EXISTS idx_cards_user ON cards(user_id);
 -- currently only the customer's chosen Quick Actions. Kept in the database
 -- because they belong to the account; the demo location is deliberately not
 -- here, being a property of the device rather than the customer.
+-- Paid placement in the rewards store. A merchant books a slot for a window at
+-- a weekly rate; the fee owed and the redemptions it drove are both derived
+-- from this row rather than stored, so a report can never disagree with the
+-- booking or with the redemption ledger.
+CREATE TABLE IF NOT EXISTS reward_promotions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_id   INTEGER NOT NULL,
+  title       TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  placement   TEXT NOT NULL DEFAULT 'featured',
+  weekly_fee  REAL NOT NULL DEFAULT 0,
+  starts_at   INTEGER NOT NULL,
+  ends_at     INTEGER NOT NULL,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_promotions_window ON reward_promotions(starts_at, ends_at);
+
 CREATE TABLE IF NOT EXISTS user_preferences (
   user_id    TEXT NOT NULL,
   key        TEXT NOT NULL,

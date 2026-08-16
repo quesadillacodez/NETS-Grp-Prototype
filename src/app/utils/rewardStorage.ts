@@ -14,6 +14,12 @@ export interface Reward {
   tags: string[];
   description: string;
   validityDays: number;
+  /**
+   * Where the reward can be redeemed, used to sort and filter by distance.
+   * Omitted for rewards with no physical outlet (wallet cashback); use
+   * "Multiple outlets" for chains that are available everywhere.
+   */
+  area?: string;
 }
 
 export interface RewardRedemption {
@@ -109,16 +115,16 @@ export const WELCOME_XP = 500;
 
 export const REWARDS: Reward[] = [
   { id: 1, merchant: 'NETS Wallet', title: '$5 Wallet Cashback', xpCost: 500, category: 'Cashback', icon: 'S$', tags: ['Instant'], description: 'Credit $5 directly to your NETS wallet balance.', validityDays: 0 },
-  { id: 2, merchant: 'Hawker Centres', title: '$5 Heartland Voucher', xpCost: 500, category: 'Vouchers', icon: 'HC', tags: ['Local', 'Food'], description: 'Use at participating NETS-enabled hawker stalls.', validityDays: 30 },
-  { id: 3, merchant: 'NYP Campus Food Court', title: '$1.50 Student Meal Credit', xpCost: 150, category: 'Vouchers', icon: 'NYP', tags: ['Campus'], description: 'A student-friendly meal credit for participating campus stalls.', validityDays: 21 },
-  { id: 4, merchant: 'Tiong Bahru Chicken Rice', title: '$2 Off Chicken Rice Set', xpCost: 200, category: 'Vouchers', icon: 'TB', tags: ['Local', 'Food'], description: 'Redeem on one chicken rice set at the participating stall.', validityDays: 30 },
-  { id: 5, merchant: 'Old Chang Kee', title: 'Free Curry Puff', xpCost: 180, category: 'Vouchers', icon: 'OCK', tags: ['Food'], description: 'One classic curry puff with any two-item purchase.', validityDays: 14 },
-  { id: 6, merchant: 'Kopitiam', title: '$3 Coffee Voucher', xpCost: 300, category: 'Vouchers', icon: 'K', tags: ['Local', 'Drinks'], description: 'Valid at participating Kopitiam drink stalls.', validityDays: 30 },
-  { id: 7, merchant: 'Ya Kun Kaya Toast', title: '$5 Breakfast Set', xpCost: 450, category: 'Partner Deals', icon: 'YK', tags: ['Food'], description: 'Redeem a selected traditional breakfast set.', validityDays: 30 },
-  { id: 8, merchant: 'Grab', title: '$10 Ride Credit', xpCost: 1000, category: 'Partner Deals', icon: 'G', tags: ['Travel'], description: 'Receive a digital ride credit code in your rewards wallet.', validityDays: 45 },
-  { id: 9, merchant: 'Popular Bookstore', title: '15% Off Stationery', xpCost: 600, category: 'Partner Deals', icon: 'P', tags: ['Campus'], description: 'Save on one stationery purchase at participating outlets.', validityDays: 30 },
-  { id: 10, merchant: 'LiHO TEA', title: '1-for-1 Medium Milk Tea', xpCost: 350, category: 'Partner Deals', icon: 'L', tags: ['Drinks'], description: 'Redeem one complimentary medium drink with purchase.', validityDays: 14 },
-  { id: 11, merchant: 'FairPrice', title: '$8 Grocery Voucher', xpCost: 800, category: 'Vouchers', icon: 'FP', tags: ['Essentials'], description: 'Use on a minimum $40 grocery purchase.', validityDays: 30 },
+  { id: 2, merchant: 'Hawker Centres', title: '$5 Heartland Voucher', xpCost: 500, category: 'Vouchers', icon: 'HC', tags: ['Local', 'Food'], description: 'Use at participating NETS-enabled hawker stalls.', validityDays: 30, area: 'Multiple outlets' },
+  { id: 3, merchant: 'NYP Campus Food Court', title: '$1.50 Student Meal Credit', xpCost: 150, category: 'Vouchers', icon: 'NYP', tags: ['Campus'], description: 'A student-friendly meal credit for participating campus stalls.', validityDays: 21, area: 'Ang Mo Kio' },
+  { id: 4, merchant: 'Tiong Bahru Chicken Rice', title: '$2 Off Chicken Rice Set', xpCost: 200, category: 'Vouchers', icon: 'TB', tags: ['Local', 'Food'], description: 'Redeem on one chicken rice set at the participating stall.', validityDays: 30, area: 'Tiong Bahru' },
+  { id: 5, merchant: 'Old Chang Kee', title: 'Free Curry Puff', xpCost: 180, category: 'Vouchers', icon: 'OCK', tags: ['Food'], description: 'One classic curry puff with any two-item purchase.', validityDays: 14, area: 'Somerset' },
+  { id: 6, merchant: 'Kopitiam', title: '$3 Coffee Voucher', xpCost: 300, category: 'Vouchers', icon: 'K', tags: ['Local', 'Drinks'], description: 'Valid at participating Kopitiam drink stalls.', validityDays: 30, area: 'Dhoby Ghaut' },
+  { id: 7, merchant: 'Ya Kun Kaya Toast', title: '$5 Breakfast Set', xpCost: 450, category: 'Partner Deals', icon: 'YK', tags: ['Food'], description: 'Redeem a selected traditional breakfast set.', validityDays: 30, area: 'Raffles Place' },
+  { id: 8, merchant: 'Grab', title: '$10 Ride Credit', xpCost: 1000, category: 'Partner Deals', icon: 'G', tags: ['Travel'], description: 'Receive a digital ride credit code in your rewards wallet.', validityDays: 45, area: 'Multiple outlets' },
+  { id: 9, merchant: 'Popular Bookstore', title: '15% Off Stationery', xpCost: 600, category: 'Partner Deals', icon: 'P', tags: ['Campus'], description: 'Save on one stationery purchase at participating outlets.', validityDays: 30, area: 'Bras Basah' },
+  { id: 10, merchant: 'LiHO TEA', title: '1-for-1 Medium Milk Tea', xpCost: 350, category: 'Partner Deals', icon: 'L', tags: ['Drinks'], description: 'Redeem one complimentary medium drink with purchase.', validityDays: 14, area: 'Orchard' },
+  { id: 11, merchant: 'FairPrice', title: '$8 Grocery Voucher', xpCost: 800, category: 'Vouchers', icon: 'FP', tags: ['Essentials'], description: 'Use on a minimum $40 grocery purchase.', validityDays: 30, area: 'Toa Payoh' },
   { id: 12, merchant: 'NETS Wallet', title: '$10 Wallet Cashback', xpCost: 1000, category: 'Cashback', icon: 'S$', tags: ['Instant'], description: 'Credit $10 directly to your NETS wallet balance.', validityDays: 0 },
 ];
 
@@ -133,6 +139,7 @@ export function getRewardsCatalog(): Reward[] {
     tags: [deal.category === 'food' ? 'Food' : 'Experience', deal.location],
     description: deal.description,
     validityDays: 30,
+    area: deal.location,
   }));
   return [...REWARDS, ...partnerRewards];
 }

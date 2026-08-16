@@ -28,6 +28,7 @@ const AdminAccessPage = lazy(() => import('./pages/AdminAccessPage').then(m => (
 const HangoutsPage = lazy(() => import('./pages/HangoutsPage').then(m => ({ default: m.HangoutsPage })));
 const RewardsPage = lazy(() => import('./pages/RewardsPage').then(m => ({ default: m.RewardsPage })));
 const WrappedPage = lazy(() => import('./pages/WrappedPage').then(m => ({ default: m.WrappedPage })));
+const WrappedComparePage = lazy(() => import('./pages/WrappedComparePage').then(m => ({ default: m.WrappedComparePage })));
 const SpendingDashboardPage = lazy(() => import('./pages/SpendingDashboardPage').then(m => ({ default: m.SpendingDashboardPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const PinRecoveryPage = lazy(() => import('./pages/PinRecoveryPage').then(m => ({ default: m.PinRecoveryPage })));
@@ -76,6 +77,7 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/deals', Page: HangoutsPage },
   { path: '/rewards', Page: RewardsPage },
   { path: '/wrapped', Page: WrappedPage },
+  { path: '/wrapped/compare', Page: WrappedComparePage },
   { path: '/dashboard', Page: SpendingDashboardPage },
   { path: '/admin', Page: AdminAccessPage },
   { path: '/merchant', Page: MerchantDashboardPage },

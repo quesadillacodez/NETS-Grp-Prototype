@@ -44,7 +44,9 @@ export function PinRecoveryPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const reduceMotion = useReducedMotion();
-  const initialLoginId = (location.state as { loginId?: string } | null)?.loginId ?? '';
+  const incomingState = location.state as { loginId?: string; from?: string } | null;
+  const initialLoginId = incomingState?.loginId ?? '';
+  const from = incomingState?.from;
   const [step, setStep] = useState<RecoveryStep>('identify');
   const [loginId, setLoginId] = useState(initialLoginId);
   const [phone, setPhone] = useState('');
@@ -125,7 +127,7 @@ export function PinRecoveryPage() {
   const goBack = () => {
     setError('');
     if (step === 'identify') {
-      navigate('/login', { replace: true, state: { loginId } });
+      navigate('/login', { replace: true, state: { loginId, from } });
     } else if (step === 'verify') {
       setEnteredCode('');
       setStep('identify');
@@ -240,7 +242,7 @@ export function PinRecoveryPage() {
             </motion.div>
             <h2 className="mt-6 text-2xl font-black text-slate-900">PIN reset complete</h2>
             <p className="mx-auto mt-2 max-w-[280px] text-sm leading-relaxed text-slate-500">Your account is unlocked and ready to use with your new PIN.</p>
-            <button type="button" onClick={() => navigate('/login', { replace: true, state: { loginId } })} className="mt-8 h-14 w-full rounded-2xl bg-[#0053a0] text-sm font-black text-white shadow-[0_12px_24px_rgba(0,83,160,0.24)]">Return to sign in</button>
+            <button type="button" onClick={() => navigate('/login', { replace: true, state: { loginId, from } })} className="mt-8 h-14 w-full rounded-2xl bg-[#0053a0] text-sm font-black text-white shadow-[0_12px_24px_rgba(0,83,160,0.24)]">Return to sign in</button>
           </div>
         ) : null}
 

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS insights (
   average_payment_time   REAL,
   fastest_payment        REAL,
   slowest_payment        REAL,
+  reliability_score      REAL,
   updated_at             INTEGER,
   PRIMARY KEY (owner_user_id, person_user_id)
 );

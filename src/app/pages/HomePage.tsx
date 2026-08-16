@@ -1,27 +1,24 @@
 import { useState, useEffect } from 'react';
-import { ArrowUpRight, ArrowDownLeft, Award, CreditCard, Bell, History, Split, TrendingUp, Sparkles, UsersRound } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Award, Bell, History, Pencil, UsersRound } from 'lucide-react';
 import { NETSLogo } from '../components/NETSLogo';
 import { BottomNav } from '../components/BottomNav';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { NotificationPopup } from '../components/NotificationPopup';
+import { CardCarousel } from '../components/CardCarousel';
+import { CardSheet } from '../components/CardSheet';
+import { QuickActionIcon } from '../components/QuickActionIcon';
+import { QuickActionsSheet } from '../components/QuickActionsSheet';
 import { useNavigate } from 'react-router';
-import { describeTransaction, getAllTransactions } from '../utils/transactionStorage';
+import { describeTransaction, getAllTransactions, walletBalanceFrom } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
 import { getRemindersToReceive, getRemindersToPay } from '../utils/reminderStorage';
+import { getCards } from '../utils/cardStorage';
+import { getQuickActions, getQuickActionIds } from '../utils/quickActions';
 import { useAppEvents } from '../utils/useAppEvents';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import { getXPStats } from '../utils/rewardStorage';
-
-const BASE_BALANCE = 2500.00;
-
-const QUICK_ACTIONS = [
-  { icon: CreditCard, label: 'Top-up',    path: '/top-up' },
-  { icon: History,    label: 'History',   path: '/all-transactions' },
-  { icon: Split,      label: 'Split Bill', path: '/scan' },
-  { icon: Bell,       label: 'Reminders', path: '/reminders' },
-];
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -29,11 +26,26 @@ export function HomePage() {
   const [transactions, setTransactions] = useState(getAllTransactions(currentUser.id));
   const [hasReminders, setHasReminders] = useState(false);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [cards, setCards] = useState(() => getCards(currentUser.id));
+  const [activeCard, setActiveCard] = useState(0);
+  const [openCardId, setOpenCardId] = useState<number | null>(null);
+  const [quickActions, setQuickActions] = useState(() => getQuickActions(currentUser.id));
+  const [editingQuickActions, setEditingQuickActions] = useState(false);
 
   useAppEvents(['transactionsUpdated', 'userSwitched', 'focus'], () => {
     const user = getCurrentUser();
     setCurrentUser(user);
     setTransactions(getAllTransactions(user.id));
+  });
+
+  // Card balances follow the wallet, so they are refreshed by a transaction as
+  // well as by a transfer between cards.
+  useAppEvents(['cardsUpdated', 'transactionsUpdated', 'userSwitched', 'focus'], () => {
+    setCards(getCards(getCurrentUser().id));
+  });
+
+  useAppEvents(['quickActionsUpdated', 'userSwitched'], () => {
+    setQuickActions(getQuickActions(getCurrentUser().id));
   });
 
   useAppEvents(['remindersUpdated', 'userSwitched'], () => {
@@ -50,8 +62,9 @@ export function HomePage() {
     return () => { delete (window as any).showAutoReminderToast; };
   }, []);
 
-  const balance = BASE_BALANCE + transactions.reduce((sum, tx) => sum + tx.amount, 0);
+  const balance = walletBalanceFrom(transactions);
   const xp = getXPStats(currentUser.id);
+  const openCard = cards.find(card => card.id === openCardId) ?? null;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -86,62 +99,51 @@ export function HomePage() {
           </div>
         </div>
 
-        <motion.div
-          initial={{ scale: 0.97, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-primary rounded-2xl p-4 shadow-lg"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
-                <span className="text-sm">{currentUser.avatar}</span>
-              </div>
-              <div>
-                <p className="text-white/80 text-xs leading-none mb-0.5">NETS vCashCard</p>
-                <p className="text-white text-xs font-semibold">{currentUser.name}</p>
-              </div>
-            </div>
-            <Sparkles className="w-4 h-4 text-white/70" />
-          </div>
-
-          <div className="mb-3">
-            <p className="text-white/80 text-xs mb-0.5">Available Balance</p>
-            <h1 className="text-3xl font-black text-white tracking-tight">${balance.toFixed(2)}</h1>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-white" />
-              <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
-              <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
-            </div>
-            <div className="flex items-center gap-1 text-white/90 text-xs font-semibold bg-white/20 px-2.5 py-1 rounded-full">
-              <TrendingUp className="w-3 h-3" />
-              Active
-            </div>
-          </div>
+        <motion.div initial={{ scale: 0.97, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+          <CardCarousel
+            cards={cards}
+            activeIndex={activeCard}
+            onActiveIndexChange={setActiveCard}
+            onSelect={card => setOpenCardId(card.id)}
+            userName={currentUser.name}
+            userAvatar={currentUser.avatar}
+          />
         </motion.div>
       </div>
 
       <div className="px-4 py-3 bg-white">
-        <h3 className="text-xs font-black text-foreground mb-2">Quick Actions</h3>
-        <div className="grid grid-cols-4 gap-2">
-          {QUICK_ACTIONS.map((action, i) => (
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-black text-foreground">Quick Actions</h3>
+          <button
+            onClick={() => setEditingQuickActions(true)}
+            aria-label="Edit quick actions"
+            // The negative margin keeps the header row its original height
+            // while the button itself still meets the 44px touch target.
+            className="-my-2 flex min-h-11 items-center gap-1 px-1 text-[10px] font-black text-primary"
+          >
+            <Pencil size={11} aria-hidden="true" /> Edit
+          </button>
+        </div>
+        {/* A landmark of its own: the shortcuts are navigation, and naming the
+            group separates "Reminders" the shortcut from "Reminders" the bell
+            in the header. */}
+        <nav aria-label="Quick actions" className="grid grid-cols-4 gap-2">
+          {quickActions.map((action, i) => (
             <motion.button
-              key={action.label}
+              key={action.id}
               initial={{ scale: 0, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: i * 0.04 }}
-              onClick={() => action.path && navigate(action.path)}
+              onClick={() => navigate(action.path)}
               className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
             >
               <div className="w-12 h-12 rounded-2xl bg-primary shadow-md flex items-center justify-center">
-                <action.icon className="w-5 h-5 text-white" />
+                <QuickActionIcon name={action.icon} className="w-5 h-5 text-white" />
               </div>
               <span className="text-xs text-foreground font-bold">{action.label}</span>
             </motion.button>
           ))}
-        </div>
+        </nav>
       </div>
 
       <div className="flex-1 px-4 py-3 overflow-y-auto pb-20 space-y-3">
@@ -222,6 +224,25 @@ export function HomePage() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {openCard && (
+          <CardSheet
+            key="card-sheet"
+            card={openCard}
+            walletBalance={balance}
+            onClose={() => setOpenCardId(null)}
+          />
+        )}
+        {editingQuickActions && (
+          <QuickActionsSheet
+            key="quick-actions-sheet"
+            userId={currentUser.id}
+            selected={getQuickActionIds(currentUser.id)}
+            onClose={() => setEditingQuickActions(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <NotificationPopup />
       <BottomNav />

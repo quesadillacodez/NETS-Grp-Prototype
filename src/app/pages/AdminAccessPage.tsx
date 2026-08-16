@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
 import { logout } from '../utils/authStorage';
-import { describeTransaction, getAllTransactions, type Transaction } from '../utils/transactionStorage';
+import { describeTransaction, getAllTransactions, walletBalanceFrom, type Transaction } from '../utils/transactionStorage';
 import { getRedemptions } from '../utils/redemptionStorage';
 import {
   getMerchants, saveMerchant, deleteMerchant,
@@ -22,6 +22,7 @@ import {
 } from '../utils/hangoutStorage';
 import { getAdminStats, getUserActivity, type AdminStats, type UserActivity } from '../utils/adminStats';
 import { AccountSwitcher } from '../components/AccountSwitcher';
+import { AdminRewardsTab } from '../components/AdminRewardsTab';
 import { useAppEvents } from '../utils/useAppEvents';
 
 const ACTIVITY_CATEGORIES: ActivityCategory[] = ['food', 'attraction', 'creative', 'active'];
@@ -145,10 +146,9 @@ function ActivityModal({ onClose, onSave, editActivity }: {
 
 // ─── User detail drill-down (light) ──────────────────────────────────────────
 function UserDetail({ user, onBack }: { user: UserActivity; onBack: () => void }) {
-  const BASE_BALANCE = 2500;
   const txns = getAllTransactions(user.id);
   const redemptions = getRedemptions(user.id);
-  const balance = BASE_BALANCE + txns.reduce((s, t) => s + t.amount, 0);
+  const balance = walletBalanceFrom(txns);
 
   return (
     <motion.div
@@ -281,7 +281,7 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 export function AdminAccessPage() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
-  const [adminTab, setAdminTab] = useState<'overview' | 'transactions' | 'hangouts' | 'merchants'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview' | 'transactions' | 'hangouts' | 'merchants' | 'rewards'>('overview');
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [showUsers, setShowUsers] = useState(false);
@@ -436,8 +436,8 @@ export function AdminAccessPage() {
       {/* Tabs — a two-by-two grid on the narrowest phones and a single row from
           360px up. Previously this was a horizontally scrolling flex row, which
           exposed a scrollbar and clipped the last tab at 320px. */}
-      <div className="grid grid-cols-2 gap-1.5 px-4 py-3 bg-white border-b border-border flex-shrink-0 min-[360px]:grid-cols-4">
-        {(['overview', 'transactions', 'hangouts', 'merchants'] as const).map((t) => (
+      <div className="grid grid-cols-2 gap-1.5 px-4 py-3 bg-white border-b border-border flex-shrink-0 min-[360px]:grid-cols-3 min-[560px]:grid-cols-5">
+        {(['overview', 'transactions', 'hangouts', 'merchants', 'rewards'] as const).map((t) => (
           <button key={t} onClick={() => setAdminTab(t)}
             aria-pressed={adminTab === t}
             className={`min-h-11 rounded-full px-2 text-xs font-bold capitalize transition-all ${adminTab === t ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
@@ -720,6 +720,8 @@ export function AdminAccessPage() {
             )}
           </div>
         )}
+
+        {adminTab === 'rewards' && <AdminRewardsTab />}
       </div>
 
       <AnimatePresence>

@@ -1,7 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import {
   ArrowRight, CalendarDays, Check, ChevronLeft, Clock3, Heart, MapPin,
-  Search, Sparkles, Users, Vote, WalletCards, X,
+  Navigation, Search, Sparkles, Users, Vote, WalletCards, X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate } from 'react-router';
@@ -31,6 +31,12 @@ import {
   type Hangout,
 } from '../utils/hangoutStorage';
 import { getAllUsers, getCurrentUser } from '../utils/userStorage';
+import { getContactGroups, createContactGroup, deleteContactGroup, type ContactGroup } from '../utils/groupStorage';
+import {
+  DEFAULT_NEARBY_RADIUS_KM, NEARBY_RADIUS_OPTIONS_KM, byDistance, getUserArea,
+  isWithinRadius, proximityTo,
+} from '../utils/geo';
+import { LocationBanner, LocationSheet } from '../components/LocationPicker';
 import { createPaymentId } from '../utils/paymentFlow';
 import { useAppEvents } from '../utils/useAppEvents';
 
@@ -48,11 +54,12 @@ function tomorrow(): string {
   return date.toISOString().slice(0, 10);
 }
 
-function ActivityCard({ activity, saved, onSave, onOpen }: {
+function ActivityCard({ activity, saved, onSave, onOpen, distanceLabel }: {
   activity: Activity;
   saved: boolean;
   onSave: (id: number) => void;
   onOpen: (activity: Activity) => void;
+  distanceLabel?: string | null;
 }) {
   return (
     <motion.article
@@ -72,8 +79,13 @@ function ActivityCard({ activity, saved, onSave, onOpen }: {
           <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(activity)}>
             <h3 className="truncate text-xs font-black text-foreground">{activity.title}</h3>
             <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-muted-foreground">
-              <MapPin size={10} /> {activity.location}
+              <MapPin size={10} aria-hidden="true" /> {activity.location}
             </p>
+            {distanceLabel && (
+              <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-primary">
+                <Navigation size={10} aria-hidden="true" /> {distanceLabel}
+              </p>
+            )}
           </button>
           <button
             aria-label={saved ? 'Remove from favourites' : 'Add to favourites'}
@@ -169,12 +181,31 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
   // already been made, and tapping one of them silently removed them instead of
   // adding them — the opposite of what the tap appeared to do.
   const [inviteIds, setInviteIds] = useState<string[]>([]);
+  const [groups, setGroups] = useState<ContactGroup[]>(() => getContactGroups(ownerId));
+  const [showSaveGroup, setShowSaveGroup] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState('');
 
   const toggleActivity = (id: number) => {
     setActivityIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   };
   const toggleInvite = (id: string) => {
     setInviteIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  };
+  const applyGroup = (group: ContactGroup) => {
+    const memberIds = group.members.map(m => m.id).filter(id => contacts.some(c => c.id === id));
+    setInviteIds(current => [...new Set([...current, ...memberIds])]);
+  };
+  const saveCurrentAsGroup = () => {
+    const name = groupNameDraft.trim();
+    if (!name || inviteIds.length === 0) return;
+    const group = createContactGroup(ownerId, name, inviteIds);
+    setGroups(current => [group, ...current]);
+    setGroupNameDraft('');
+    setShowSaveGroup(false);
+  };
+  const removeGroup = (id: number) => {
+    deleteContactGroup(id);
+    setGroups(current => current.filter(g => g.id !== id));
   };
 
   const selectedActivities = activities.filter(activity => activityIds.includes(activity.id));
@@ -236,6 +267,42 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
                 : `${inviteIds.length} ${inviteIds.length === 1 ? 'friend' : 'friends'} selected`}
             </span>
           </div>
+
+          {groups.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">Group templates</p>
+              <div className="flex gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden">
+                {groups.map(group => (
+                  <div key={group.id} className="relative shrink-0">
+                    <button
+                      onClick={() => applyGroup(group)}
+                      className="flex items-center gap-2 rounded-xl border border-border bg-secondary py-2 pl-2 pr-3"
+                    >
+                      <div className="flex -space-x-2">
+                        {group.members.slice(0, 3).map(m => (
+                          <div key={m.id} className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-primary/15 text-xs">
+                            {m.avatar}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[11px] font-black leading-tight text-foreground">{group.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{group.members.length} people</p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => removeGroup(group.id)}
+                      aria-label={`Delete ${group.name}`}
+                      className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full border border-border bg-white shadow"
+                    >
+                      <X size={11} className="text-muted-foreground" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2">
             {contacts.map(contact => {
               const selected = inviteIds.includes(contact.id);
@@ -260,6 +327,41 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
             <p className="mt-2 text-[10px] text-muted-foreground">
               Tap a friend to invite them. A Hangout needs at least one other person to vote.
             </p>
+          )}
+
+          {inviteIds.length > 0 && (
+            <div className="mt-3">
+              {!showSaveGroup ? (
+                <button onClick={() => setShowSaveGroup(true)} className="text-[11px] font-black text-primary">
+                  + Save these friends as a group
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="e.g. Secondary school friends"
+                    value={groupNameDraft}
+                    onChange={event => setGroupNameDraft(event.target.value)}
+                    onKeyDown={event => event.key === 'Enter' && saveCurrentAsGroup()}
+                    className="flex-1 rounded-xl border border-border px-3 py-2 text-xs outline-none focus:border-primary"
+                  />
+                  <button
+                    onClick={saveCurrentAsGroup}
+                    disabled={!groupNameDraft.trim()}
+                    className="rounded-xl bg-primary px-3 py-2 text-[11px] font-black text-white disabled:opacity-40"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setShowSaveGroup(false); setGroupNameDraft(''); }}
+                    className="px-2 py-2 text-[11px] font-bold text-muted-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -447,7 +549,11 @@ export function HangoutsPage() {
   const [activities, setActivities] = useState(() => getActivities());
   const [savedIds, setSavedIds] = useState(() => getSavedActivityIds(currentUser.id));
   const [plans, setPlans] = useState(() => getHangoutsForUser(currentUser.id));
-  const [tab, setTab] = useState<'discover' | 'favourites' | 'plans'>('discover');
+  const [tab, setTab] = useState<'discover' | 'nearby' | 'favourites' | 'plans'>('discover');
+  const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_NEARBY_RADIUS_KM);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  // Bumped whenever the customer moves, so the distance lists recompute.
+  const [locationVersion, setLocationVersion] = useState(0);
   const [category, setCategory] = useState<ActivityCategory | 'all'>('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Activity | null>(null);
@@ -464,6 +570,7 @@ export function HangoutsPage() {
     setPlans(getHangoutsForUser(user.id));
   };
   useAppEvents(['userSwitched', 'savedActivitiesUpdated', 'hangoutsUpdated', 'activitiesUpdated', 'databaseReady', 'focus'], refresh);
+  useAppEvents(['locationChanged', 'userSwitched'], () => setLocationVersion(version => version + 1));
 
   const visibleActivities = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -476,6 +583,26 @@ export function HangoutsPage() {
     () => activities.filter(activity => savedIds.includes(activity.id)),
     [activities, savedIds],
   );
+
+  // Everything with a distance attached, closest first. Used by the Near you
+  // tab and to label cards everywhere else.
+  const withDistance = useMemo(
+    () => activities
+      .map(activity => ({ activity, proximity: proximityTo(currentUser.id, activity.location) }))
+      .sort((a, b) => byDistance(a.proximity, b.proximity)),
+    [activities, currentUser.id, locationVersion],
+  );
+  const proximityById = useMemo(
+    () => new Map(withDistance.map(entry => [entry.activity.id, entry.proximity])),
+    [withDistance],
+  );
+  const nearby = useMemo(
+    () => withDistance.filter(entry => isWithinRadius(entry.proximity, radiusKm)),
+    [withDistance, radiusKm],
+  );
+  const userArea = useMemo(() => getUserArea(currentUser.id), [currentUser.id, locationVersion]);
+  const distanceLabelFor = (activity: Activity): string | null =>
+    proximityById.get(activity.id)?.label ?? null;
   const selectedPlan = selectedPlanId ? plans.find(plan => plan.id === selectedPlanId) ?? null : null;
 
   const save = (id: number) => toggleSavedActivity(currentUser.id, id);
@@ -488,10 +615,11 @@ export function HangoutsPage() {
           <div><NETSLogo /><p className="mt-0.5 text-xs text-muted-foreground">Plan the experience before anyone pays.</p></div>
           <button onClick={() => navigate('/profile')} aria-label={`Profile and settings for ${currentUser.name}`} className="grid h-11 w-11 place-items-center rounded-xl bg-primary text-base"><span aria-hidden="true">{currentUser.avatar}</span></button>
         </div>
-        <div className="mt-4 grid grid-cols-3 rounded-xl bg-secondary p-1">
-          <button onClick={() => setTab('discover')} className={`rounded-lg py-2 text-xs font-black ${tab === 'discover' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Discover</button>
-          <button onClick={() => setTab('favourites')} className={`rounded-lg py-2 text-xs font-black ${tab === 'favourites' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Favourites {savedIds.length ? `(${savedIds.length})` : ''}</button>
-          <button onClick={() => setTab('plans')} className={`rounded-lg py-2 text-xs font-black ${tab === 'plans' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Hangouts {plans.length ? `(${plans.length})` : ''}</button>
+        <div className="mt-4 grid grid-cols-4 rounded-xl bg-secondary p-1">
+          <button onClick={() => setTab('discover')} className={`min-h-11 rounded-lg text-[11px] font-black ${tab === 'discover' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Discover</button>
+          <button onClick={() => setTab('nearby')} className={`min-h-11 rounded-lg text-[11px] font-black ${tab === 'nearby' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Near you</button>
+          <button onClick={() => setTab('favourites')} className={`min-h-11 rounded-lg text-[11px] font-black ${tab === 'favourites' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Saved{savedIds.length ? ` (${savedIds.length})` : ''}</button>
+          <button onClick={() => setTab('plans')} className={`min-h-11 rounded-lg text-[11px] font-black ${tab === 'plans' ? 'bg-white text-primary shadow-sm' : 'text-muted-foreground'}`}>Plans{plans.length ? ` (${plans.length})` : ''}</button>
         </div>
       </header>
 
@@ -510,7 +638,7 @@ export function HangoutsPage() {
                 <Heart size={14} fill="currentColor" /><strong>{savedIds.length} favourited</strong><span className="text-primary/70">- view your list</span>
               </button>
             )}
-            <div className="grid grid-cols-2 gap-3">{visibleActivities.map(activity => <ActivityCard key={activity.id} activity={activity} saved={savedIds.includes(activity.id)} onSave={save} onOpen={setSelected} />)}</div>
+            <div className="grid grid-cols-2 gap-3">{visibleActivities.map(activity => <ActivityCard key={activity.id} activity={activity} saved={savedIds.includes(activity.id)} onSave={save} onOpen={setSelected} distanceLabel={distanceLabelFor(activity)} />)}</div>
             {visibleActivities.length === 0 && (
               <div className="mt-14 text-center">
                 <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-secondary text-muted-foreground"><Search size={28} /></div>
@@ -524,6 +652,69 @@ export function HangoutsPage() {
             )}
           </main>
         </>
+      ) : tab === 'nearby' ? (
+        <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
+          <div className="mb-3">
+            <LocationBanner
+              userId={currentUser.id}
+              title="Hangouts near you"
+              onOpen={() => setShowLocationPicker(true)}
+            />
+          </div>
+
+          <div className="mb-3">
+            <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+              Within
+            </p>
+            <div className="flex gap-2">
+              {NEARBY_RADIUS_OPTIONS_KM.map(option => (
+                <button
+                  key={option}
+                  onClick={() => setRadiusKm(option)}
+                  aria-pressed={radiusKm === option}
+                  className={`min-h-11 flex-1 rounded-xl text-xs font-bold ${radiusKm === option ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}
+                >
+                  {option} km
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <p className="mb-3 text-xs text-muted-foreground" aria-live="polite">
+            {nearby.length} of {activities.length} ideas within {radiusKm} km
+          </p>
+
+          {nearby.length === 0 ? (
+            <div className="mt-12 text-center">
+              <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-secondary text-muted-foreground">
+                <Navigation size={28} aria-hidden="true" />
+              </div>
+              <h2 className="mt-3 text-base font-black">Nothing within {radiusKm} km</h2>
+              <p className="mx-auto mt-1 max-w-[260px] text-xs text-muted-foreground">
+                No Hangout ideas are that close to {userArea} right now. Widen the search to see more.
+              </p>
+              <button
+                onClick={() => setRadiusKm(NEARBY_RADIUS_OPTIONS_KM[NEARBY_RADIUS_OPTIONS_KM.length - 1])}
+                className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-xs font-black text-white"
+              >
+                Search within {NEARBY_RADIUS_OPTIONS_KM[NEARBY_RADIUS_OPTIONS_KM.length - 1]} km
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {nearby.map(({ activity, proximity }) => (
+                <ActivityCard
+                  key={activity.id}
+                  activity={activity}
+                  saved={savedIds.includes(activity.id)}
+                  onSave={save}
+                  onOpen={setSelected}
+                  distanceLabel={proximity.label}
+                />
+              ))}
+            </div>
+          )}
+        </main>
       ) : tab === 'favourites' ? (
         <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
           <div className="mb-4 flex items-center justify-between">
@@ -539,7 +730,7 @@ export function HangoutsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {favourites.map(activity => <ActivityCard key={activity.id} activity={activity} saved onSave={save} onOpen={setSelected} />)}
+              {favourites.map(activity => <ActivityCard key={activity.id} activity={activity} saved onSave={save} onOpen={setSelected} distanceLabel={distanceLabelFor(activity)} />)}
             </div>
           )}
         </main>
@@ -560,6 +751,11 @@ export function HangoutsPage() {
 
       <BottomNav />
       <AccountSwitcher isOpen={showAccountSwitcher} onClose={() => setShowAccountSwitcher(false)} />
+      <AnimatePresence>
+        {showLocationPicker && (
+          <LocationSheet userId={currentUser.id} onClose={() => setShowLocationPicker(false)} />
+        )}
+      </AnimatePresence>
       <AnimatePresence>{selected && <ActivityDetail activity={selected} saved={savedIds.includes(selected.id)} onSave={() => save(selected.id)} onPlan={() => startPlan([selected.id, ...savedIds])} onClose={() => setSelected(null)} />}</AnimatePresence>
       <AnimatePresence>{showCreate && <CreateHangoutSheet initialIds={createSeed} activities={activities} ownerId={currentUser.id} onClose={() => setShowCreate(false)} onCreated={id => { setShowCreate(false); refresh(); setTab('plans'); setSelectedPlanId(id); }} />}</AnimatePresence>
       <AnimatePresence>{selectedPlan && <PlanDetail plan={selectedPlan} currentUserId={currentUser.id} onClose={() => setSelectedPlanId(null)} onRefresh={refresh} onPay={(plan, activity) => navigate('/scan', { state: {

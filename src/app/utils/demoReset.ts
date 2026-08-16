@@ -64,6 +64,8 @@ export function clearActivityData(): void {
     DELETE FROM budgets;
     DELETE FROM processed_payments;
     DELETE FROM insights;
+    DELETE FROM cards;
+    DELETE FROM reward_promotions;
   `);
   // Let the one-off demo history seed run again on the next reload.
   run("DELETE FROM app_meta WHERE key IN ('seeded-demo-history', 'user-cleared-fresh')");
@@ -73,6 +75,10 @@ export function clearActivityData(): void {
   window.dispatchEvent(new CustomEvent('notificationsUpdated'));
   window.dispatchEvent(new CustomEvent('hangoutsUpdated'));
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
+  // Cards are re-seeded with their starting float on the next read, so the
+  // demo begins from the same card balances every time.
+  window.dispatchEvent(new CustomEvent('cardsUpdated'));
+  window.dispatchEvent(new CustomEvent('promotionsUpdated'));
 }
 
 /**
@@ -236,6 +242,54 @@ export function loadPresentationScenario(): DemoScenarioSummary {
       link: '/hangouts',
     });
   }
+
+  // ── Reward history, so the merchant insights and the store's popularity
+  // signals have something real to show the moment the demo loads ──
+  //
+  // Two of these are deliberately dated *before* a purchase at the same
+  // merchant, which is what makes the "came back after redeeming" figure in the
+  // merchant report non-zero — the single number that proves a reward worked.
+  const redemptions: {
+    userId: string; rewardId: number; title: string; merchant: string;
+    xpCost: number; days: number; used: boolean; validityDays: number;
+  }[] = [
+    // Alex redeemed a coffee voucher, then paid at Kopitiam two days later.
+    { userId: ALEX, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 28, used: true, validityDays: 30 },
+    // And a milk tea deal, then paid at LiHO three days later.
+    { userId: ALEX, rewardId: 10, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA', xpCost: 350, days: 5, used: true, validityDays: 14 },
+    { userId: ALEX, rewardId: 1, title: '$5 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 500, days: 7, used: true, validityDays: 0 },
+    { userId: SARAH, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 10, used: false, validityDays: 30 },
+    { userId: MIKE, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 8, used: false, validityDays: 30 },
+  ];
+
+  redemptions.forEach((redemption, index) => {
+    const redeemedAt = daysAgo(redemption.days);
+    run(
+      `INSERT INTO reward_redemptions
+        (user_id, reward_id, title, merchant, xp_cost, ref_code, redeemed_at, used, expires_at, used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        redemption.userId, redemption.rewardId, redemption.title, redemption.merchant,
+        redemption.xpCost, `XP-DEMO${String(index + 1).padStart(2, '0')}`, redeemedAt,
+        redemption.used ? 1 : 0,
+        redemption.validityDays > 0 ? redeemedAt + redemption.validityDays * 24 * 60 * 60 * 1000 : 0,
+        redemption.used ? redeemedAt + 60 * 60 * 1000 : null,
+      ],
+    );
+  });
+
+  // A placement already running, so the store shows a sponsored reward and the
+  // portal has a live booking to report on.
+  run(
+    `INSERT INTO reward_promotions
+      (reward_id, title, merchant, placement, weekly_fee, starts_at, ends_at, impressions, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [10, '1-for-1 Medium Milk Tea', 'LiHO TEA', 'spotlight', 90,
+      daysAgo(3), daysAgo(-11), 148, daysAgo(3)],
+  );
+
+  window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
+  window.dispatchEvent(new CustomEvent('promotionsUpdated'));
 
   syncDatabaseFilesNow();
 

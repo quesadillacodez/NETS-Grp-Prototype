@@ -145,6 +145,55 @@ CREATE TABLE IF NOT EXISTS payment_methods (
 );
 CREATE INDEX IF NOT EXISTS idx_payment_methods_user ON payment_methods(user_id);
 
+-- The NETS cards shown in the Home carousel. The vCashCard is the wallet
+-- itself, so its balance column is unused and ignored on read — the wallet
+-- balance has exactly one definition, the sum over the transactions table. The
+-- stored balance is only meaningful for the cards that really do hold their own
+-- float (the prepaid card and the motoring CashCard).
+CREATE TABLE IF NOT EXISTS cards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  last_four  TEXT NOT NULL,
+  balance    REAL NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cards_user ON cards(user_id);
+
+-- Per-account app preferences that are not settings screens of their own —
+-- currently only the customer's chosen Quick Actions. Kept in the database
+-- because they belong to the account; the demo location is deliberately not
+-- here, being a property of the device rather than the customer.
+-- Paid placement in the rewards store. A merchant books a slot for a window at
+-- a weekly rate; the fee owed and the redemptions it drove are both derived
+-- from this row rather than stored, so a report can never disagree with the
+-- booking or with the redemption ledger.
+CREATE TABLE IF NOT EXISTS reward_promotions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_id   INTEGER NOT NULL,
+  title       TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  placement   TEXT NOT NULL DEFAULT 'featured',
+  weekly_fee  REAL NOT NULL DEFAULT 0,
+  starts_at   INTEGER NOT NULL,
+  ends_at     INTEGER NOT NULL,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_promotions_window ON reward_promotions(starts_at, ends_at);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value      TEXT,
+  updated_at INTEGER,
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS merchants (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
@@ -333,8 +382,28 @@ CREATE TABLE IF NOT EXISTS insights (
   average_payment_time   REAL,
   fastest_payment        REAL,
   slowest_payment        REAL,
+  reliability_score      REAL,
   updated_at             INTEGER,
   PRIMARY KEY (owner_user_id, person_user_id)
+);
+
+-- Saved "group templates" (e.g. "Secondary School Friends") so a bill split can
+-- select everyone in one tap instead of picking contacts one by one.
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_user_id TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contact_groups_owner ON contact_groups(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS contact_group_members (
+  group_id INTEGER NOT NULL,
+  user_id  TEXT NOT NULL,
+  PRIMARY KEY (group_id, user_id),
+  FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
 );
 `;
 
@@ -486,6 +555,16 @@ export async function initDatabase(): Promise<void> {
     }
   } catch (e) {
     console.warn('reminders.thank_you migration skipped:', e);
+  }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(insights)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('reliability_score')) {
+      db.run('ALTER TABLE insights ADD COLUMN reliability_score REAL');
+    }
+  } catch (e) {
+    console.warn('insights.reliability_score migration skipped:', e);
   }
 
   try {

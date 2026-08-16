@@ -19,6 +19,7 @@ const IP_RECOVERY_LIMIT = 10;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
 const EXPOSE_DEMO_OTP = !IS_PRODUCTION && process.env.EXPOSE_DEMO_OTP !== 'false';
+const SERVE_BUILD = IS_PRODUCTION || process.env.NETS_SERVE_BUILD === 'true';
 const rateWindows = new Map();
 
 if (IS_PRODUCTION && !process.env.SESSION_SECRET) {
@@ -484,7 +485,7 @@ function serveProduction(req, res, url) {
 }
 
 let vite;
-if (!IS_PRODUCTION) {
+if (!SERVE_BUILD) {
   const { createServer } = await import('vite');
   vite = await createServer({ root: ROOT, server: { middlewareMode: true }, appType: 'spa' });
 }

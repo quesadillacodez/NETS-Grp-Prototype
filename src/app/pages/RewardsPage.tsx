@@ -1,7 +1,7 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
-  AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Gift, History, LockKeyhole,
-  MapPin, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
+  AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Flame, Gift, History, LockKeyhole,
+  MapPin, Megaphone, Navigation, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -28,7 +28,13 @@ import {
   type RewardRedemption,
 } from '../utils/rewardStorage';
 import { getCurrentUser } from '../utils/userStorage';
+import {
+  DEFAULT_NEARBY_RADIUS_KM, byDistance, getUserArea, isWithinRadius, proximityTo,
+} from '../utils/geo';
 import { useAppEvents } from '../utils/useAppEvents';
+import { LocationSheet } from '../components/LocationPicker';
+import { getLivePromotions, recordImpressions } from '../utils/promotionStorage';
+import { getRedemptionCounts } from '../utils/merchantInsights';
 
 type RewardsTab = 'overview' | 'store' | 'wallet' | 'history';
 
@@ -103,18 +109,20 @@ function OverlaySheet({ children, onClose }: { children: ReactNode; onClose: () 
   );
 }
 
-function RewardDetail({ reward, currentXP, onRedeem, onClose }: {
+function RewardDetail({ reward, userId, currentXP, onRedeem, onClose }: {
   reward: Reward;
+  userId: string;
   currentXP: number;
   onRedeem: () => void;
   onClose: () => void;
 }) {
   const canRedeem = currentXP >= reward.xpCost;
+  const proximity = proximityTo(userId, reward.area);
   return (
     <OverlaySheet onClose={onClose}>
       <div className="px-5 pb-8">
         <div className="mb-5 flex items-start justify-between">
-          <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-sm font-black text-primary">{reward.icon}</div><div><p className="text-xs font-bold text-muted-foreground">{reward.merchant}</p><h2 className="max-w-[245px] text-xl font-black leading-tight">{reward.title}</h2></div></div>
+          <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-3xl" aria-hidden="true">{reward.icon}</div><div><p className="text-xs font-bold text-muted-foreground">{reward.merchant}</p><h2 className="max-w-[245px] text-xl font-black leading-tight">{reward.title}</h2></div></div>
           <button onClick={onClose} aria-label="Close reward details" className="grid h-11 w-11 place-items-center rounded-full bg-secondary"><X size={18} aria-hidden="true" /></button>
         </div>
         <div className="mb-4 flex items-center justify-between rounded-2xl bg-[#1e2a4a] p-4 text-white"><div><p className="text-xs text-white/65">Reward cost</p><p className="text-2xl font-black">{reward.xpCost.toLocaleString()} XP</p></div><Gift size={30} className="text-[#ffca28]" /></div>
@@ -127,6 +135,12 @@ function RewardDetail({ reward, currentXP, onRedeem, onClose }: {
               ? `Valid for ${reward.validityDays} days — until ${formatExpiry(Date.now() + reward.validityDays * 24 * 60 * 60 * 1000)}`
               : 'Cashback is applied to your wallet instantly'}
           </p>
+          {reward.area && (
+            <p className="flex items-center gap-2">
+              <MapPin size={15} className="text-primary" aria-hidden="true" />
+              {reward.area}{proximity.label && !proximity.islandwide ? ` · ${proximity.label}` : ''}
+            </p>
+          )}
         </div>
         <div className="mb-4">
           <TermsAndConditions terms={getRewardTerms(reward)} />
@@ -407,32 +421,183 @@ function Overview({ userId, onTab }: { userId: string; onTab: (tab: RewardsTab) 
   );
 }
 
-function StoreView({ currentXP, onSelect }: { currentXP: number; onSelect: (reward: Reward) => void }) {
+function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
+  userId: string;
+  currentXP: number;
+  onSelect: (reward: Reward) => void;
+  onChangeLocation: () => void;
+}) {
   const [category, setCategory] = useState<RewardCategory | 'All'>('All');
   const [search, setSearch] = useState('');
-  const catalog = getRewardsCatalog();
+  const [nearMeOnly, setNearMeOnly] = useState(false);
+  const userArea = getUserArea(userId);
   const term = search.trim().toLowerCase();
-  const filtered = catalog.filter(reward =>
-    (category === 'All' || reward.category === category) &&
-    (!term || `${reward.title} ${reward.merchant} ${reward.tags.join(' ')}`.toLowerCase().includes(term)),
-  );
+
+  // Paid placements and redemption counts are read once per render of the
+  // store. A promoted reward is pinned above the listing and labelled; it keeps
+  // its real XP price, its real distance and its real lock state, because a
+  // merchant is buying position, not a different set of facts.
+  const live = getLivePromotions();
+  const promotedIds = new Set(live.map(promotion => promotion.rewardId));
+  const spotlight = live.find(promotion => promotion.placement === 'spotlight') ?? null;
+  const redemptionCounts = getRedemptionCounts();
+
+  useEffect(() => {
+    recordImpressions(live.map(promotion => promotion.id));
+    // Counted once per visit to the store, keyed on which placements are live,
+    // so re-rendering the list does not inflate a merchant's report.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live.map(promotion => promotion.id).join(',')]);
+
+  // Distance is attached once, then used for both the filter and the labels.
+  const catalog = getRewardsCatalog()
+    .map(reward => ({ reward, proximity: proximityTo(userId, reward.area) }));
+
+  const matching = catalog
+    .filter(({ reward, proximity }) =>
+      (category === 'All' || reward.category === category) &&
+      (!term || `${reward.title} ${reward.merchant} ${reward.tags.join(' ')}`.toLowerCase().includes(term)) &&
+      // Wallet cashback has no outlet, so it is not a "near me" result.
+      (!nearMeOnly || isWithinRadius(proximity, DEFAULT_NEARBY_RADIUS_KM)))
+    .sort((a, b) => (nearMeOnly ? byDistance(a.proximity, b.proximity) : 0));
+
+  // Promoted rewards lead the list, in the order NETS sold the slots. They are
+  // filtered like everything else — a paid slot cannot force a reward into a
+  // search or a radius it does not belong in.
+  const promotedOrder = live.map(promotion => promotion.rewardId);
+  const filtered = [...matching].sort((a, b) => {
+    const rankA = promotedOrder.indexOf(a.reward.id);
+    const rankB = promotedOrder.indexOf(b.reward.id);
+    if (rankA === -1 && rankB === -1) return 0;
+    if (rankA === -1) return 1;
+    if (rankB === -1) return -1;
+    return rankA - rankB;
+  });
+
+  const spotlightEntry = spotlight
+    ? matching.find(entry => entry.reward.id === spotlight.rewardId) ?? null
+    : null;
+
+  const nearbyCount = catalog.filter(entry => isWithinRadius(entry.proximity, DEFAULT_NEARBY_RADIUS_KM)).length;
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between"><div><p className="text-xs text-muted-foreground">Spend with purpose</p><h1 className="text-xl font-black">Rewards Store</h1></div><div className="rounded-xl bg-[#fff2bd] px-3 py-2 text-xs font-black text-[#7a5a00]">{currentXP.toLocaleString()} XP</div></div>
-      <div className="mb-2 flex items-center gap-2 rounded-xl bg-secondary px-3 py-2.5"><Search size={16} className="text-muted-foreground" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search rewards" className="min-w-0 flex-1 bg-transparent text-xs outline-none" /></div>
-      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto pb-1">{(['All', 'Cashback', 'Vouchers', 'Partner Deals'] as const).map(item => <button key={item} onClick={() => setCategory(item)} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold ${category === item ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>{item}</button>)}</div>
-      <div className="grid grid-cols-2 gap-3">{filtered.map(reward => {
+
+      <div className="mb-2 flex items-center gap-2 rounded-xl bg-secondary px-3 py-2.5"><Search size={16} className="text-muted-foreground" aria-hidden="true" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search rewards" aria-label="Search rewards" className="min-w-0 flex-1 bg-transparent text-xs outline-none" /></div>
+
+      <button
+        onClick={() => setNearMeOnly(current => !current)}
+        aria-pressed={nearMeOnly}
+        className={`mb-2 flex w-full items-center gap-2 rounded-xl border-2 p-2.5 text-left ${nearMeOnly ? 'border-primary bg-primary/5' : 'border-border bg-white'}`}
+      >
+        <div className={`grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl ${nearMeOnly ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
+          <Navigation size={16} aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-black text-foreground">Near me</p>
+          <p className="truncate text-[10px] text-muted-foreground">
+            {nearbyCount} outlets within {DEFAULT_NEARBY_RADIUS_KM} km of {userArea}
+          </p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${nearMeOnly ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
+          {nearMeOnly ? 'On' : 'Off'}
+        </span>
+      </button>
+
+      <button
+        onClick={onChangeLocation}
+        aria-label={`Change your location — currently ${userArea}`}
+        className="mb-2 flex min-h-11 w-full items-center justify-center gap-1 text-[11px] font-bold text-primary"
+      >
+        <MapPin size={12} aria-hidden="true" /> You're in {userArea} · Change
+      </button>
+
+      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto pb-1">{(['All', 'Cashback', 'Vouchers', 'Partner Deals'] as const).map(item => <button key={item} onClick={() => setCategory(item)} aria-pressed={category === item} className={`min-h-11 whitespace-nowrap rounded-full px-3 text-xs font-bold ${category === item ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>{item}</button>)}</div>
+
+      {spotlightEntry && (
+        <button
+          onClick={() => onSelect(spotlightEntry.reward)}
+          // Named explicitly: the same reward also appears in the listing
+          // below, and a screen reader should be able to tell the banner and
+          // the card apart rather than hearing the reward announced twice.
+          aria-label={`Sponsored spotlight: ${spotlightEntry.reward.title} from ${spotlightEntry.reward.merchant}, ${spotlightEntry.reward.xpCost} XP`}
+          className="mb-3 flex w-full items-center gap-3 rounded-2xl border-2 border-primary bg-primary/5 p-3 text-left"
+        >
+          <div className="grid h-14 w-14 flex-shrink-0 place-items-center rounded-2xl bg-white text-3xl" aria-hidden="true">
+            {spotlightEntry.reward.icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white">
+              <Megaphone size={9} aria-hidden="true" /> Sponsored
+            </span>
+            <p className="truncate text-xs font-black text-foreground">{spotlightEntry.reward.title}</p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              {spotlightEntry.reward.merchant}
+              {spotlightEntry.proximity.label ? ` · ${spotlightEntry.proximity.label}` : ''}
+            </p>
+          </div>
+          <span className="flex-shrink-0 text-xs font-black text-primary">{spotlightEntry.reward.xpCost} XP</span>
+        </button>
+      )}
+
+      <p className="mb-2 text-xs text-muted-foreground" aria-live="polite">
+        {filtered.length} {filtered.length === 1 ? 'reward' : 'rewards'}
+        {nearMeOnly ? ` near ${userArea}` : ''}
+      </p>
+
+      <div className="grid grid-cols-2 gap-3">{filtered.map(({ reward, proximity }) => {
         const locked = currentXP < reward.xpCost;
-        return <button key={reward.id} onClick={() => onSelect(reward)} className="rounded-2xl border border-border bg-white p-3 text-left shadow-sm"><div className="mb-3 flex items-start justify-between"><div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-xs font-black text-primary">{reward.icon}</div>{locked && <LockKeyhole size={14} className="text-muted-foreground" />}</div><p className="text-[10px] font-bold text-muted-foreground">{reward.merchant}</p><h3 className="mt-0.5 min-h-8 text-xs font-black leading-tight">{reward.title}</h3><div className="mt-3 flex items-center justify-between"><span className="text-xs font-black text-primary">{reward.xpCost} XP</span><span className={`rounded-lg px-2 py-1 text-[9px] font-black ${locked ? 'bg-secondary text-muted-foreground' : 'bg-primary text-white'}`}>{locked ? 'View' : 'Redeem'}</span></div></button>;
+        const promoted = promotedIds.has(reward.id);
+        const redeemed = redemptionCounts.get(reward.id) ?? 0;
+        return (
+          <button key={reward.id} onClick={() => onSelect(reward)} className={`rounded-2xl border bg-white p-3 text-left shadow-sm ${promoted ? 'border-primary' : 'border-border'}`}>
+            <div className="mb-3 flex items-start justify-between">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-xl" aria-hidden="true">{reward.icon}</div>
+              {locked && <LockKeyhole size={14} className="text-muted-foreground" aria-hidden="true" />}
+            </div>
+            {promoted && (
+              <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-primary">
+                <Megaphone size={8} aria-hidden="true" /> Sponsored
+              </span>
+            )}
+            <p className="text-[10px] font-bold text-muted-foreground">{reward.merchant}</p>
+            <h3 className="mt-0.5 min-h-8 text-xs font-black leading-tight">{reward.title}</h3>
+            {proximity.label && (
+              <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-primary">
+                <Navigation size={9} aria-hidden="true" /> {proximity.label}
+              </p>
+            )}
+            {redeemed > 0 && (
+              <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-bold text-[#a86400]">
+                <Flame size={9} aria-hidden="true" /> Redeemed {redeemed}×
+              </p>
+            )}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs font-black text-primary">{reward.xpCost} XP</span>
+              <span className={`rounded-lg px-2 py-1 text-[9px] font-black ${locked ? 'bg-secondary text-muted-foreground' : 'bg-primary text-white'}`}>{locked ? 'View' : 'Redeem'}</span>
+            </div>
+          </button>
+        );
       })}</div>
+
+      {live.length > 0 && (
+        <p className="mt-3 text-center text-[10px] leading-relaxed text-muted-foreground">
+          Sponsored rewards are paid placements by the merchant. Their XP price, distance and
+          availability are exactly the same as every other reward.
+        </p>
+      )}
+
       {filtered.length === 0 && (
         <div className="mt-14 text-center">
-          <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-secondary text-muted-foreground"><Search size={28} /></div>
+          <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-secondary text-muted-foreground"><Search size={28} aria-hidden="true" /></div>
           <h2 className="mt-3 text-base font-black">No results</h2>
           <p className="mx-auto mt-1 max-w-[260px] text-xs text-muted-foreground">
-            {term
-              ? `Nothing matches "${search.trim()}". Try another keyword or category.`
-              : 'No rewards in this category right now — check back soon.'}
+            {nearMeOnly
+              ? `No reward outlets within ${DEFAULT_NEARBY_RADIUS_KM} km of ${userArea} match this filter. Turn off "Near me" to see the rest.`
+              : term
+                ? `Nothing matches "${search.trim()}". Try another keyword or category.`
+                : 'No rewards in this category right now — check back soon.'}
           </p>
         </div>
       )}
@@ -599,10 +764,11 @@ export function RewardsPage() {
   const [receipt, setReceipt] = useState<RewardRedemption | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
   const navigate = useNavigate();
   const [, setVersion] = useState(0);
   const refresh = () => { setCurrentUser(getCurrentUser()); setVersion(version => version + 1); };
-  useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus'], refresh);
+  useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus', 'locationChanged'], refresh);
   const stats = getXPStats(currentUser.id);
 
   const confirmRedemption = () => {
@@ -649,13 +815,25 @@ export function RewardsPage() {
       </header>
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
         {tab === 'overview' && <Overview userId={currentUser.id} onTab={setTab} />}
-        {tab === 'store' && <StoreView currentXP={stats.currentXP} onSelect={setSelectedReward} />}
+        {tab === 'store' && (
+          <StoreView
+            userId={currentUser.id}
+            currentXP={stats.currentXP}
+            onSelect={setSelectedReward}
+            onChangeLocation={() => setShowLocationPicker(true)}
+          />
+        )}
         {tab === 'wallet' && <WalletView userId={currentUser.id} onOpen={openVoucher} />}
         {tab === 'history' && <HistoryView userId={currentUser.id} onOpen={openVoucher} />}
       </main>
       <BottomNav />
       <AccountSwitcher isOpen={showAccountSwitcher} onClose={() => setShowAccountSwitcher(false)} />
-      <AnimatePresence>{selectedReward && <RewardDetail reward={selectedReward} currentXP={stats.currentXP} onClose={() => setSelectedReward(null)} onRedeem={confirmRedemption} />}</AnimatePresence>
+      <AnimatePresence>
+        {showLocationPicker && (
+          <LocationSheet userId={currentUser.id} onClose={() => setShowLocationPicker(false)} />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>{selectedReward && <RewardDetail reward={selectedReward} userId={currentUser.id} currentXP={stats.currentXP} onClose={() => setSelectedReward(null)} onRedeem={confirmRedemption} />}</AnimatePresence>
       <AnimatePresence>
         {receipt && (
           <RedemptionReceipt

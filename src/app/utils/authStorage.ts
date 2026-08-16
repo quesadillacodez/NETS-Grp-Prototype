@@ -10,6 +10,16 @@ export function isLoggedIn(): boolean {
   return getAllUsers().some(user => user.id === id);
 }
 
+// Guards a post-login redirect target so it can only ever be an in-app path,
+// never an absolute/external URL — prevents an open-redirect via a crafted
+// deep link.
+export function isSafeInternalPath(path: unknown): path is string {
+  if (typeof path !== 'string' || path.length === 0) return false;
+  if (!path.startsWith('/') || path.startsWith('//')) return false;
+  if (path.includes('://')) return false;
+  return true;
+}
+
 
 function normalizeLoginId(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, '');

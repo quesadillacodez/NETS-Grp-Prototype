@@ -5,11 +5,10 @@ import confetti from 'canvas-confetti';
 import {
   Building2, Check, ChevronLeft, ChevronRight, CreditCard, Home, Landmark, Wallet,
 } from 'lucide-react';
-import { getAllTransactions, addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
+import { addTransaction, formatDateForTransaction, getWalletBalance } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
 import { celebrate } from '../utils/motionPreference';
 
-const BASE_BALANCE = 2500.00;
 const PRESETS = [10, 20, 50, 100, 200, 500];
 const MIN_TOPUP = 10;
 const MAX_TOPUP = 1000;
@@ -25,9 +24,7 @@ type Step = 'amount' | 'review' | 'done';
 export function TopUpPage() {
   const navigate = useNavigate();
   const [user] = useState(() => getCurrentUser());
-  const [balance, setBalance] = useState(
-    () => BASE_BALANCE + getAllTransactions(getCurrentUser().id).reduce((sum, tx) => sum + tx.amount, 0),
-  );
+  const [balance, setBalance] = useState(() => getWalletBalance(getCurrentUser().id));
 
   const [step, setStep] = useState<Step>('amount');
   const [amount, setAmount] = useState('');

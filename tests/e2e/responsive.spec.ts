@@ -53,8 +53,26 @@ test.describe('Compact phone (320px)', () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test('the card carousel and Quick Actions editor fit at 320px', async ({ page }) => {
+    await signInAsCustomer(page, USERS.alex);
+
+    // The carousel scrolls inside itself; the page behind it must not.
+    await page.getByRole('button', { name: 'Show NETS Motoring CashCard' }).click();
+    await expect(page.getByText('···· 5563')).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    await page.getByRole('button', { name: 'Edit quick actions' }).click();
+    await expect(page.getByRole('dialog', { name: 'Edit Quick Actions' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
   test('key controls meet the 44px minimum touch target', async ({ page }) => {
     await signInAsCustomer(page, USERS.alex);
+
+    // Home: the control that opens the Quick Actions editor.
+    const edit = await page.getByRole('button', { name: 'Edit quick actions' }).boundingBox();
+    expect(edit?.height ?? 0).toBeGreaterThanOrEqual(44);
+
     await tapNav(page, 'Profile');
 
     for (const name of [/Personal Information/, /Payment Methods/, /Demo Controls/]) {

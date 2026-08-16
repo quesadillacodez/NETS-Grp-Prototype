@@ -1,7 +1,15 @@
 
-  # NETS Pay Together
+  # NETS Pay Together — Lifestyle Banking Prototype
 
-  This is a code bundle for Mobile Banking App Prototype. The original project is available at https://www.figma.com/design/UPb1XE6jPq6Xrh8UccxeFr/Mobile-Banking-App-Prototype.
+  A mobile banking prototype built around NETS: payments and bill splitting,
+  savings goals, an XP rewards store, NETS Hangouts, and merchant insights. App
+  data uses a browser-local SQLite cache synchronized through a secure server.
+  The original design bundle is available at
+  https://www.figma.com/design/UPb1XE6jPq6Xrh8UccxeFr/Mobile-Banking-App-Prototype.
+
+  **[CHANGELOG.md](CHANGELOG.md) records every change made to the prototype,
+  newest first**, along with the limitations that are deliberate rather than
+  unfinished.
 
   ## Running the code
 
@@ -19,6 +27,8 @@
   - `npm test` for regression tests covering split rounding, transaction
     classification, and Hangout vote ties.
   - `npm run build` for the production bundle.
+  - `npm run test:e2e` for the Playwright end-to-end suite, which serves a
+    production preview build rather than the dev server.
 
   ## Secure server and synchronized data
 
@@ -118,6 +128,24 @@ individual feature ownership clear:
   wallet cashback writes back to the same transaction ledger used by Home.
 - **Admin Portal (`/admin`):** management users can inspect live users and transactions,
   manage merchants, and maintain partner rewards that appear in the XP Rewards Store.
+- **Merchant insights and paid placements (`/admin` → Rewards):** per-merchant reporting
+  derived from the ledger — sales, busiest hour, repeat customers, most-redeemed rewards,
+  and how many customers came back and paid after redeeming. Merchants can also buy
+  Featured or Spotlight position in the store; promoted rewards are labelled *Sponsored*
+  on the customer side and keep their real price, distance and availability.
+- **Cards on Home:** a swipeable carousel of the customer's NETS cards — the vCashCard
+  (the wallet itself), a NETS Prepaid Card and a Motoring CashCard. The last two hold
+  their own float: they can be loaded from the wallet, emptied back into it, and frozen.
+- **Quick Actions:** the four shortcuts on Home are chosen by the customer from a
+  catalogue of eleven, stored per account in `user_preferences`.
+- **Savings goals:** money put into a goal leaves the spendable balance as a Goal
+  Contribution transaction and comes back as a Goal Withdrawal, so the wallet balance and
+  the goals always agree. Neither counts as merchant spending.
+- **Location awareness (`src/app/utils/geo.ts`):** hangout ideas and reward outlets are
+  ranked and filtered by great-circle distance from the customer's area. Alex Chen starts
+  in Orchard; the area can be changed in-app from either surface, and both follow it.
+  There is no device location permission — swapping `getUserArea` for the browser
+  Geolocation API is the only change a production build needs.
 - **Shared persistence:** hangout shortlists, plans, votes, reward redemptions, users,
   payments, reminders, budgets and admin data use the local sql.js cache and authenticated
   server synchronization so the same account can resume on another device.

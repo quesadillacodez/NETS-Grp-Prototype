@@ -244,6 +244,62 @@ CREATE TABLE IF NOT EXISTS insights (
   average_payment_time   REAL,
   fastest_payment        REAL,
   slowest_payment        REAL,
+  reliability_score      REAL,
   updated_at             INTEGER,
   PRIMARY KEY (owner_user_id, person_user_id)
+);
+
+-- ---------- contact_groups ----------
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_user_id TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------- contact_group_members ----------
+CREATE TABLE IF NOT EXISTS contact_group_members (
+  group_id INTEGER NOT NULL,
+  user_id  TEXT NOT NULL,
+  PRIMARY KEY (group_id, user_id),
+  FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------- cards ----------
+CREATE TABLE IF NOT EXISTS cards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  last_four  TEXT NOT NULL,
+  balance    REAL NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------- user_preferences ----------
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value      TEXT,
+  updated_at INTEGER,
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------- reward_promotions ----------
+CREATE TABLE IF NOT EXISTS reward_promotions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_id   INTEGER NOT NULL,
+  title       TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  placement   TEXT NOT NULL DEFAULT 'featured',
+  weekly_fee  REAL NOT NULL DEFAULT 0,
+  starts_at   INTEGER NOT NULL,
+  ends_at     INTEGER NOT NULL,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER
 );

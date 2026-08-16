@@ -41,10 +41,18 @@ export async function openApp(page: Page): Promise<void> {
 }
 
 export async function signIn(page: Page, user: TestUser): Promise<void> {
-  await openApp(page);
+  // After signOut the app is already on the login screen, having navigated
+  // there client-side. Reloading would throw away the loaded database and
+  // replay the whole startup sequence for no benefit, so only load the page
+  // when we are not already looking at the form.
+  const submit = page.getByRole('button', { name: 'Sign in securely' });
+  if (!await submit.isVisible().catch(() => false)) {
+    await openApp(page);
+  }
+
   await page.locator('#login-user-id').fill(user.loginId);
   await page.locator('#login-pin').fill(user.pin);
-  await page.getByRole('button', { name: 'Sign in securely' }).click();
+  await submit.click();
 }
 
 export async function signInAsCustomer(page: Page, user: TestUser): Promise<void> {
@@ -69,6 +77,15 @@ export async function signOut(page: Page): Promise<void> {
   }
   await profileTab.click();
   await page.getByRole('button', { name: 'Sign Out' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in securely' })).toBeVisible();
+}
+
+/**
+ * Sign out of the management portal, which has its own control rather than the
+ * customer app's Profile screen.
+ */
+export async function signOutOfAdmin(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Sign out of the management portal' }).click();
   await expect(page.getByRole('button', { name: 'Sign in securely' })).toBeVisible();
 }
 

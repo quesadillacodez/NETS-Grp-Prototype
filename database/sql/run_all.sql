@@ -266,3 +266,26 @@ CREATE TABLE IF NOT EXISTS contact_group_members (
   FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- ---------- cards ----------
+CREATE TABLE IF NOT EXISTS cards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  last_four  TEXT NOT NULL,
+  balance    REAL NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------- user_preferences ----------
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value      TEXT,
+  updated_at INTEGER,
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

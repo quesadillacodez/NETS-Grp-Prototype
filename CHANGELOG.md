@@ -5,6 +5,38 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Vercel authentication and durable sessions — `a644461`
+
+The production deployment previously contained only the Vite bundle. Direct
+visits such as `/login` returned Vercel's 404 page, `/api/session` did not exist,
+and the login screen translated that missing backend into **Secure sign-in is
+temporarily unavailable**.
+
+- A root `api/index.mjs` now exposes the existing secure Node request handler as
+  a Vercel Function. An API-specific rewrite keeps every `/api/*` endpoint on
+  that function, while the final SPA rewrite sends unmatched browser routes to
+  `index.html`.
+- Credential hashes, HttpOnly sessions, recovery challenges, audit records and
+  the synchronized SQLite snapshot now persist in the connected Redis store.
+  The adapter accepts the `KV_REST_API_URL` / `KV_REST_API_TOKEN` names generated
+  by the installed Vercel integration as well as current `UPSTASH_REDIS_*`
+  names.
+- The JSON store remains the local-development fallback. Vercel fails clearly
+  during initialization if Redis or `SESSION_SECRET` is missing instead of
+  appearing to deploy successfully with a backend that cannot retain state.
+- Concurrent requests inside one Fluid Compute instance are serialized around
+  the prototype's cohesive state document, avoiding shared-memory session
+  races. The built-in customer, administrator and merchant accounts seed a new
+  demo store unless a custom `NETS_SEED_USERS_JSON` is supplied.
+
+Verified with strict TypeScript checking, 90 unit tests, four server-security
+tests, nine focused browser journeys across customer, administrator and merchant
+roles, a production Vite build, and direct checks of the rewritten API and SPA
+paths. PIN recovery in production still requires an approved
+`OTP_WEBHOOK_URL`; ordinary sign-in does not.
+
+---
+
 ## Merchant portal, voucher return loop, secure sessions and PWA — `e31122f`
 
 The XP Store now has a dedicated seller side instead of leaving every merchant
@@ -337,9 +369,11 @@ workflow running typecheck, tests and the production build.
 
 Deliberate, and worth stating plainly in a presentation:
 
-- **No backend.** PINs are stored unhashed in a browser-local SQLite database,
-  recovery codes are shown on screen rather than delivered by SMS, and each
-  browser holds its own isolated copy of the data.
+- **Prototype backend.** PIN hashes, sessions and synchronized app state now
+  live behind a Vercel Function and connected Redis store. The prototype keeps
+  its state in one Redis document and uses an in-instance login throttle; a
+  banking rollout needs transactional records, a distributed rate limiter and
+  managed identity controls.
 - **Admin access is client-side.** The management portal is guarded in the UI,
   not by server-side authorisation.
 - **Payments are simulated.** The NETS sandbox needs credentials the prototype

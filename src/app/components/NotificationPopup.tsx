@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  CHANNEL_LABELS, getNotificationPreferences, getUnreadNotifications, type Notification,
+  CHANNEL_LABELS, dismissNotificationBanner, getNotificationPreferences, getPushableNotifications,
+  type Notification,
 } from '../utils/notificationStorage';
 import { getCurrentUser } from '../utils/userStorage';
 import { useNavigate } from 'react-router';
@@ -16,34 +17,33 @@ const EVENTS_THAT_CHANGE_NOTIFICATIONS = [
  * The transient banner for notifications that just arrived. Dismissing it only
  * hides the banner — nothing is marked as read, because the full history now
  * lives in the Notification Centre and dismissing a popup should not silently
- * clear it.
+ * clear it. The dismissal itself is persisted (`banner_dismissed` in the
+ * database) rather than kept in component state, so it survives navigating
+ * away and back, or reopening the app — this component remounts on every page
+ * that renders it, so anything kept only in memory here would be lost.
  */
 export function NotificationPopup() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isVisible, setIsVisible] = useState(false);
-  // Ids already shown in a banner this session, so a dismissed banner does not
-  // pop straight back up on the next unrelated update.
-  const dismissed = useRef<Set<number>>(new Set());
 
   useAppEvents(EVENTS_THAT_CHANGE_NOTIFICATIONS, () => {
     const user = getCurrentUser();
     const preferences = getNotificationPreferences(user.id);
-    const pushable = getUnreadNotifications(user.id)
-      .filter(item => preferences[item.channel])
-      .filter(item => !dismissed.current.has(item.id));
+    const pushable = getPushableNotifications(user.id)
+      .filter(item => preferences[item.channel]);
 
     setNotifications(pushable);
     setIsVisible(pushable.length > 0);
   });
 
   const dismiss = () => {
-    notifications.forEach(item => dismissed.current.add(item.id));
+    notifications.forEach(item => dismissNotificationBanner(item.id));
     setIsVisible(false);
   };
 
   const viewAll = () => {
-    notifications.forEach(item => dismissed.current.add(item.id));
+    notifications.forEach(item => dismissNotificationBanner(item.id));
     setIsVisible(false);
     navigate('/notifications');
   };

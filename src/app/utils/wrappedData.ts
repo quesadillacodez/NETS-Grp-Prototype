@@ -1,4 +1,6 @@
 import { query } from './db';
+import { computeReliabilityScore } from './reminderStorage';
+import { calculateTransactionXP } from './rewardStorage';
 
 // ─── Types (mirror the original Wrapped feature) ─────────────────────────────
 export interface WrappedTxn {
@@ -134,6 +136,16 @@ const EQUIVALENTS = [
   { emoji: '🚗', label: 'Grab rides', price: 12 },
 ] as const;
 
+// ─── XP earned ─────────────────────────────────────────────────────────────
+// Same formula the Rewards tab uses per transaction — summed over the month
+// Wrapped is currently showing, rather than the real calendar month getXPStats
+// assumes.
+export function getXPEarned(year: number, month: number, txns: WrappedTxn[]): number {
+  return filterByMonth(txns, year, month)
+    .filter((t) => t.amount < 0)
+    .reduce((sum, t) => sum + calculateTransactionXP(t.merchant, t.amount).xp, 0);
+}
+
 export function getFunEquivalent(totalSpent: number) {
   if (totalSpent <= 0) return null;
   const inRange = EQUIVALENTS
@@ -250,24 +262,42 @@ export function getSplitBillStats(userId: string, year: number, month: number) {
   const hasPending = Object.keys(owedPending).length > 0;
   const biggestDebtorEntry = Object.entries(hasPending ? owedPending : owedAll).sort((a, b) => b[1] - a[1])[0];
 
-  // Slowest payer — real average days between created_date and paid_date.
+  // Slowest payer — real average days between created_date and paid_date. The
+  // same per-person paid/total counts also feed the most-reliable pick below.
   const daysByPerson: Record<string, { total: number; count: number }> = {};
+  const paidCountByPerson: Record<string, { paid: number; total: number }> = {};
   inMonth.forEach((r) => {
-    if (r.status === 'paid' && r.paid_date && r.created_date) {
-      const paid = new Date(String(r.paid_date)).getTime();
-      const created = new Date(String(r.created_date)).getTime();
-      if (!isNaN(paid) && !isNaN(created) && paid >= created) {
-        const days = Math.floor((paid - created) / (1000 * 60 * 60 * 24));
-        const name = String(r.name || 'Someone');
-        if (!daysByPerson[name]) daysByPerson[name] = { total: 0, count: 0 };
-        daysByPerson[name].total += days;
-        daysByPerson[name].count += 1;
+    const name = String(r.name || 'Someone');
+    if (!paidCountByPerson[name]) paidCountByPerson[name] = { paid: 0, total: 0 };
+    paidCountByPerson[name].total += 1;
+    if (r.status === 'paid') {
+      paidCountByPerson[name].paid += 1;
+      if (r.paid_date && r.created_date) {
+        const paid = new Date(String(r.paid_date)).getTime();
+        const created = new Date(String(r.created_date)).getTime();
+        if (!isNaN(paid) && !isNaN(created) && paid >= created) {
+          const days = Math.floor((paid - created) / (1000 * 60 * 60 * 24));
+          if (!daysByPerson[name]) daysByPerson[name] = { total: 0, count: 0 };
+          daysByPerson[name].total += days;
+          daysByPerson[name].count += 1;
+        }
       }
     }
   });
   const slowest = Object.entries(daysByPerson)
     .map(([name, d]) => ({ name, avgDays: d.total / d.count }))
     .sort((a, b) => b.avgDays - a.avgDays)[0];
+
+  // Most reliable — highest reliability score among people who paid back at
+  // least once this month, using the same formula as the Insights tab.
+  const mostReliableEntry = Object.entries(paidCountByPerson)
+    .filter(([, d]) => d.paid > 0)
+    .map(([name, d]) => {
+      const days = daysByPerson[name];
+      const avgDays = days ? days.total / days.count : 0;
+      return { name, paid: d.paid, score: computeReliabilityScore(d.paid, d.total, avgDays) ?? 0 };
+    })
+    .sort((a, b) => b.score - a.score || b.paid - a.paid)[0];
 
   // Most reminders — summed reminder_count per person.
   const reminders: Record<string, number> = {};
@@ -283,6 +313,7 @@ export function getSplitBillStats(userId: string, year: number, month: number) {
     biggestDebtor: biggestDebtorEntry ? { name: biggestDebtorEntry[0], amount: biggestDebtorEntry[1], settled: !hasPending } : null,
     slowestPayer: slowest ? { name: slowest.name, avgDays: slowest.avgDays } : null,
     mostReminders: mostReminders ? { name: mostReminders[0], totalReminders: mostReminders[1] } : null,
+    mostReliable: mostReliableEntry ? { name: mostReliableEntry.name, score: mostReliableEntry.score } : null,
     totalSplitBills: inMonth.length,
   };
 }

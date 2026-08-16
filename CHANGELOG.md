@@ -5,6 +5,60 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Merchant portal, voucher return loop, secure sessions and PWA — `e31122f`
+
+The XP Store now has a dedicated seller side instead of leaving every merchant
+decision inside the administrator portal. A separate **Kopitiam Merchant**
+account is linked only to its own merchant record and is routed to a private
+`/merchant` workspace; customers cannot enter it, and merchants cannot enter
+customer or administrator journeys.
+
+**What the merchant can act on**
+
+- A mobile merchant dashboard reports NETS revenue, order count, average ticket,
+  anonymous unique and repeat customers, XP awarded and vouchers used.
+- Product references from real customer payments become a ranked menu report,
+  making signals such as **Nasi Lemak is the best seller** visible without
+  exposing customer names, cards or individual spending histories.
+- Seven-day revenue bars and breakfast, lunch and dinner demand show when stock
+  and staffing matter most.
+- A rule-based action feed turns those figures into simple recommendations for
+  the top item, the quietest period and customer retention.
+- The merchant can set a 1x, 1.5x or 2x XP multiplier for future purchases and
+  immediately see the customer-facing earning effect.
+- A CSV export provides the merchant-facing report that was previously missing
+  while deliberately omitting payment credentials and customer identities.
+
+Merchant sales are stored in a new scoped `merchant_sales` table. Successful
+full and split-payment journeys write into it once per payment ID, so the seller
+view follows actual app usage. A clearly labelled sample week gives the demo
+account an understandable starting story and remains distinguishable from live
+payments.
+
+**Voucher expiry return loop** — active vouchers now create deduplicated Rewards
+notifications as they cross the seven-, three- and one-day thresholds. Opening
+the alert deep-links to the voucher wallet, turning the existing Notification
+Centre into a useful return-visit trigger instead of introducing another inbox.
+
+**Security and installability**
+
+- Authentication moved behind a Node server with hashed PINs, throttled login
+  and recovery attempts, expiring challenges, HttpOnly sessions, CSRF checks and
+  an authenticated revision-based SQLite synchronisation endpoint.
+- Customer, administrator and merchant landing routes are derived from explicit
+  roles while safe internal deep links still work after customer sign-in.
+- A web app manifest, install card, offline fallback, service worker and NETS
+  icons make the prototype installable as a PWA.
+- The completed `XP_Rewards_Store_Deck.pptx` and its ten rendered slide previews
+  are included as presentation deliverables; generated inspection traces are
+  ignored.
+
+The integration with the newer Home, rewards-placement, location and merchant
+insight work passes 90 unit tests and 13 focused Chrome tests covering login,
+role isolation, the merchant dashboard, server security and PWA metadata.
+
+---
+
 ## Merchant insights and paid placements — `2fb7e08`
 
 The rewards store had a catalogue and no other side to it. Merchants got nothing

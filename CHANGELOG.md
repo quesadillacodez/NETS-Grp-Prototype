@@ -5,6 +5,53 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## A working card carousel and editable Quick Actions — `a77377d`
+
+Two things on Home only looked finished: the three dots under the vCashCard
+were decoration — there was one card and nothing to swipe to — and the four
+Quick Actions were a hard-coded array.
+
+**A carousel of real NETS cards**
+- Alongside the **vCashCard** there is now a **NETS Prepaid Card** (tap and pay,
+  no bank account needed) and a **NETS Motoring CashCard** (ERP, carparks,
+  petrol), each with its own float, masked number and status.
+- Swiping works because the track is a native scroll-snap container rather than
+  a JavaScript drag gesture: a finger swipe follows the finger, keeps its
+  momentum, and never fights the page's vertical scroll.
+- The dots are real buttons and the track takes arrow keys, so the carousel is
+  reachable without a touchscreen. Only the card in view is exposed to
+  assistive technology, and only its balance is the page's heading.
+
+**Cards that do something** — tapping a card opens a sheet that loads it from
+the wallet, moves the money back, or freezes it.
+- A load is a real movement of the customer's money: recorded as a transaction
+  and gone from the spendable balance. Two new transaction types, **Card Load**
+  and **Card Unload**, neither counted as spending — nothing has been spent
+  until the card is used at a merchant.
+- The limits — the wallet balance, the card's $500 ceiling, the frozen flag —
+  live in `cardStorage`, so the sheet cannot move money the rules would refuse.
+- The vCashCard holds no separate balance (it is the wallet, read from the
+  ledger like everywhere else), cannot be frozen, and sends you to Top-up.
+
+**Editable Quick Actions**
+- An **Edit** control opens a picker of eleven shortcuts — Wrapped, the spending
+  dashboard, Hangouts, Rewards, alerts, help and the rest — of which four can be
+  chosen, in the order they will appear.
+- The choice is stored per account in a new `user_preferences` table and
+  survives signing out. It is normalised on read, so a selection written by an
+  older build can never leave the row with a gap or a shortcut to a route that
+  no longer exists.
+
+The three bottom sheets are now one shared component that is a real dialog:
+labelled, closed by Escape, focused on open. The Quick Actions row became a
+named navigation landmark — which is also what separates *Reminders* the
+shortcut from *Reminders* the bell in the header.
+
+Covered by 12 unit tests over the selection rules and 11 end-to-end tests over
+the carousel, the transfers, freezing and editing the shortcuts.
+
+---
+
 ## A movable location, and an illustrated rewards store — `61b1f15`
 
 The demo location was fixed to Orchard, so the distances added below were the

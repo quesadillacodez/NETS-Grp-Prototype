@@ -98,6 +98,11 @@ individual feature ownership clear:
   wallet cashback writes back to the same transaction ledger used by Home.
 - **Admin Portal (`/admin`):** management users can inspect live users and transactions,
   manage merchants, and maintain partner rewards that appear in the XP Rewards Store.
+- **Cards on Home:** a swipeable carousel of the customer's NETS cards — the vCashCard
+  (the wallet itself), a NETS Prepaid Card and a Motoring CashCard. The last two hold
+  their own float: they can be loaded from the wallet, emptied back into it, and frozen.
+- **Quick Actions:** the four shortcuts on Home are chosen by the customer from a
+  catalogue of eleven, stored per account in `user_preferences`.
 - **Savings goals:** money put into a goal leaves the spendable balance as a Goal
   Contribution transaction and comes back as a Goal Withdrawal, so the wallet balance and
   the goals always agree. Neither counts as merchant spending.

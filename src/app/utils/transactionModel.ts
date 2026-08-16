@@ -14,7 +14,9 @@ export type TransactionType =
   | 'refund'
   | 'topup'
   | 'goal_contribution'
-  | 'goal_withdrawal';
+  | 'goal_withdrawal'
+  | 'card_load'
+  | 'card_unload';
 
 export interface TransactionTypeMeta {
   /** Full name used in receipts, filters and the admin portal. */
@@ -70,6 +72,17 @@ export const TRANSACTION_TYPE_META: Record<TransactionType, TransactionTypeMeta>
     label: 'Goal Withdrawal', shortLabel: 'From savings', activity: 'Returned from savings',
     direction: 'in', flowLabel: 'Savings goal', countsAsSpending: false,
   },
+  // Money moved between the wallet and another NETS card the customer holds.
+  // Same reasoning as a savings goal: the balance moves, but nothing has been
+  // spent until the card is used at a merchant.
+  card_load: {
+    label: 'Card Load', shortLabel: 'To card', activity: 'Loaded onto card',
+    direction: 'out', flowLabel: 'NETS card', countsAsSpending: false,
+  },
+  card_unload: {
+    label: 'Card Unload', shortLabel: 'From card', activity: 'Returned from card',
+    direction: 'in', flowLabel: 'NETS card', countsAsSpending: false,
+  },
 };
 
 export const TRANSACTION_TYPES = Object.keys(TRANSACTION_TYPE_META) as TransactionType[];
@@ -111,6 +124,7 @@ export function classifyTransaction(row: ClassifiableTransaction): TransactionTy
   // Wallet flows are identified before the transfer rules, because a cashback
   // credit was historically written with status 'received' as well.
   if (category === 'savings') return amount < 0 ? 'goal_contribution' : 'goal_withdrawal';
+  if (category === 'card') return amount < 0 ? 'card_load' : 'card_unload';
   if (category === 'topup' || /top.?up/i.test(name)) return 'topup';
   if (category === 'reward' || /cashback/i.test(name)) return 'cashback';
   if (category === 'refund' || /refund/i.test(name)) return 'refund';

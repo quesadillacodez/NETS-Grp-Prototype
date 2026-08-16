@@ -63,6 +63,7 @@ export function clearActivityData(): void {
     DELETE FROM budgets;
     DELETE FROM processed_payments;
     DELETE FROM insights;
+    DELETE FROM cards;
   `);
   // Let the one-off demo history seed run again on the next reload.
   run("DELETE FROM app_meta WHERE key IN ('seeded-demo-history', 'user-cleared-fresh')");
@@ -72,6 +73,9 @@ export function clearActivityData(): void {
   window.dispatchEvent(new CustomEvent('notificationsUpdated'));
   window.dispatchEvent(new CustomEvent('hangoutsUpdated'));
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
+  // Cards are re-seeded with their starting float on the next read, so the
+  // demo begins from the same card balances every time.
+  window.dispatchEvent(new CustomEvent('cardsUpdated'));
 }
 
 /**

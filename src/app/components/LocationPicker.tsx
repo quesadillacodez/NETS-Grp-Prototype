@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { motion } from 'motion/react';
 import { Check, ChevronRight, Navigation, RotateCcw, Search, X } from 'lucide-react';
 import {
   SELECTABLE_AREAS, formatDistance, getUserArea, isDefaultArea, proximityTo,
   resetUserArea, setUserArea,
 } from '../utils/geo';
+import { BottomSheet } from './BottomSheet';
 
 /**
  * The banner that states where the customer is, and opens the picker when
@@ -56,17 +56,8 @@ export function LocationSheet({ userId, onClose }: { userId: string; onClose: ()
   };
 
   return (
-    <motion.div
-      className="absolute inset-0 z-50 flex items-end bg-black/45"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      onClick={onClose}
-    >
-      <motion.div
-        className="max-h-[85%] w-full overflow-y-auto rounded-t-[28px] bg-white"
-        initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-        onClick={event => event.stopPropagation()}
-      >
+    <BottomSheet label="Set your location" onClose={onClose}>
+      <div>
         <div className="sticky top-0 z-10 bg-white px-5 pb-3 pt-3">
           <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-300" />
           <div className="flex items-start justify-between">
@@ -143,7 +134,7 @@ export function LocationSheet({ userId, onClose }: { userId: string; onClose: ()
             A production build would ask the phone for it.
           </p>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </BottomSheet>
   );
 }

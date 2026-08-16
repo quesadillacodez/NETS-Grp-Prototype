@@ -139,6 +139,37 @@ CREATE TABLE IF NOT EXISTS payment_methods (
 );
 CREATE INDEX IF NOT EXISTS idx_payment_methods_user ON payment_methods(user_id);
 
+-- The NETS cards shown in the Home carousel. The vCashCard is the wallet
+-- itself, so its balance column is unused and ignored on read — the wallet
+-- balance has exactly one definition, the sum over the transactions table. The
+-- stored balance is only meaningful for the cards that really do hold their own
+-- float (the prepaid card and the motoring CashCard).
+CREATE TABLE IF NOT EXISTS cards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  last_four  TEXT NOT NULL,
+  balance    REAL NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cards_user ON cards(user_id);
+
+-- Per-account app preferences that are not settings screens of their own —
+-- currently only the customer's chosen Quick Actions. Kept in the database
+-- because they belong to the account; the demo location is deliberately not
+-- here, being a property of the device rather than the customer.
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value      TEXT,
+  updated_at INTEGER,
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS merchants (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,

@@ -38,6 +38,8 @@ export interface Notification {
   channel: NotificationChannel;
   /** In-app route this notification opens, e.g. `/reminders` or `/transaction/12`. */
   link?: string;
+  /** Whether the push banner for this notification was dismissed with its (x). */
+  bannerDismissed: boolean;
 }
 
 /**
@@ -89,6 +91,7 @@ function rowToNotification(r: Record<string, any>): Notification {
     reminderId: r.reminder_id ?? undefined,
     channel,
     link: r.link ?? defaultLinkFor(channel),
+    bannerDismissed: r.banner_dismissed === 1,
   };
 }
 
@@ -102,6 +105,26 @@ export function getAllNotifications(userId: string): Notification[] {
 
 export function getUnreadNotifications(userId: string): Notification[] {
   return query('SELECT * FROM notifications WHERE user_id = ? AND read = 0 ORDER BY id DESC', [userId]).map(rowToNotification);
+}
+
+/**
+ * Unread notifications eligible for the push banner: excludes anything whose
+ * banner was already dismissed with its (x), so a dismissed notification does
+ * not pop back up on another page or after reopening the app. It still counts
+ * as unread in the Notification Centre — dismissing the banner is not the same
+ * as reading it.
+ */
+export function getPushableNotifications(userId: string): Notification[] {
+  return query(
+    'SELECT * FROM notifications WHERE user_id = ? AND read = 0 AND banner_dismissed = 0 ORDER BY id DESC',
+    [userId],
+  ).map(rowToNotification);
+}
+
+/** Permanently dismiss a notification's push banner (does not mark it read). */
+export function dismissNotificationBanner(id: number): void {
+  run('UPDATE notifications SET banner_dismissed = 1 WHERE id = ?', [id]);
+  notifyUpdated();
 }
 
 export function getUnreadCount(userId: string): number {
@@ -119,7 +142,7 @@ export function getUnreadCountsByChannel(userId: string): Record<NotificationCha
 }
 
 export function addNotification(
-  notification: Omit<Notification, 'id' | 'channel' | 'link'> & {
+  notification: Omit<Notification, 'id' | 'channel' | 'link' | 'bannerDismissed'> & {
     channel?: NotificationChannel;
     link?: string;
   },

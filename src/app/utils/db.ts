@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   reminder_id      INTEGER,
   channel          TEXT,
   link             TEXT,
+  -- Set once the push banner for this notification has been dismissed with its
+  -- (x) button, so it never pops back up on another page or app reopen. Distinct
+  -- from read: dismissing the banner does not clear it from the Notification
+  -- Centre.
+  banner_dismissed INTEGER DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
@@ -509,6 +514,7 @@ export async function initDatabase(): Promise<void> {
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
     if (!names.includes('channel')) db.run('ALTER TABLE notifications ADD COLUMN channel TEXT');
     if (!names.includes('link')) db.run('ALTER TABLE notifications ADD COLUMN link TEXT');
+    if (!names.includes('banner_dismissed')) db.run('ALTER TABLE notifications ADD COLUMN banner_dismissed INTEGER DEFAULT 0');
   } catch (e) {
     console.warn('notifications channel migration skipped:', e);
   }

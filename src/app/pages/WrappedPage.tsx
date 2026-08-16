@@ -14,6 +14,7 @@ import {
   getTopMerchants,
   getFunEquivalent,
   getBusiestDay,
+  getXPEarned,
   type WrappedTxn,
 } from "../utils/wrappedData";
 import { useAppEvents } from "../utils/useAppEvents";
@@ -22,7 +23,7 @@ import { buildSharePayload, buildCompareUrl, copyToClipboard } from "../utils/wr
 import {
   Sparkles, TrendingUp, TrendingDown, ShoppingBag, Award, Calendar, CalendarClock,
   ChevronLeft, ChevronRight, DollarSign, UserX, Clock, Bell, Eye, EyeOff,
-  Share2, Users, Play, Pause, X, Home, Volume2, VolumeX, Heart, Download, Link2,
+  Share2, Users, Play, Pause, X, Home, Volume2, VolumeX, Heart, Download, Link2, ShieldCheck, Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useState, useRef, useEffect } from "react";
@@ -170,16 +171,16 @@ function StoryProgress({ total, current, isPlaying }: { total: number; current: 
 // The full slide order. The component builds its actual deck from this,
 // skipping any slide whose data is empty (so no blank slides ever show).
 const SLIDE_ORDER = [
-  "intro", "personality", "total-spent", "fun-equivalence", "transactions", "top-category",
-  "biggest-purchase", "top-merchant", "busiest-day", "most-paid", "biggest-debtor",
-  "slowest-payer", "most-reminders", "summary",
+  "intro", "personality", "total-spent", "fun-equivalence", "xp-earned", "transactions", "top-category",
+  "biggest-purchase", "top-merchant", "busiest-day", "most-paid", "most-reliable",
+  "biggest-debtor", "slowest-payer", "most-reminders", "summary",
 ] as const;
 
 type EnabledStats = {
   personality: boolean; totalSpent: boolean; funEquivalent: boolean; transactions: boolean;
   topCategory: boolean; biggestPurchase: boolean; topMerchant: boolean; busiestDay: boolean;
   mostPaid: boolean; biggestDebtor: boolean; slowestPayer: boolean;
-  mostReminders: boolean;
+  mostReminders: boolean; mostReliable: boolean; xpEarned: boolean;
 };
 
 type WrappedSlideProps = {
@@ -289,7 +290,7 @@ export function WrappedPage() {
   const [enabledStats, setEnabledStats] = useState<EnabledStats>({
     personality: true, totalSpent: true, funEquivalent: true, transactions: true, topCategory: true,
     biggestPurchase: true, topMerchant: true, busiestDay: true, mostPaid: true, biggestDebtor: true,
-    slowestPayer: true, mostReminders: true,
+    slowestPayer: true, mostReminders: true, mostReliable: true, xpEarned: true,
   });
 
   const personality = getFinancialPersonality(selectedMonth.year, selectedMonth.month, txns);
@@ -297,6 +298,7 @@ export function WrappedPage() {
   const categories = calculateSpendingByCategory(selectedMonth.year, selectedMonth.month, txns);
   const topMerchants = getTopMerchants(selectedMonth.year, selectedMonth.month, txns);
   const funEquivalent = getFunEquivalent(stats.totalSpent);
+  const xpEarned = getXPEarned(selectedMonth.year, selectedMonth.month, txns);
   const busiestDay = getBusiestDay(selectedMonth.year, selectedMonth.month, txns);
   const splitBillStats = getSplitBillStats(currentUser.id, selectedMonth.year, selectedMonth.month);
   const comparison = getSpendingComparison(selectedMonth.year, selectedMonth.month, txns);
@@ -306,6 +308,7 @@ export function WrappedPage() {
   // so nothing ever renders blank.
   const slides = SLIDE_ORDER.filter((s) => {
     if (s === "fun-equivalence") return !!funEquivalent;
+    if (s === "xp-earned") return xpEarned > 0;
     if (s === "top-category") return categories.length > 0;
     if (s === "biggest-purchase") return !!stats.biggestPurchase;
     if (s === "top-merchant") return topMerchants.length > 0;
@@ -313,6 +316,7 @@ export function WrappedPage() {
     if (s === "biggest-debtor") return !!splitBillStats?.biggestDebtor;
     if (s === "slowest-payer") return !!splitBillStats?.slowestPayer;
     if (s === "most-reminders") return !!splitBillStats?.mostReminders;
+    if (s === "most-reliable") return !!splitBillStats?.mostReliable;
     return true;
   });
 
@@ -525,6 +529,7 @@ export function WrappedPage() {
   type SummaryTileData = { key: string; icon: React.ReactNode; label: string; value: string };
   const summaryTiles: SummaryTileData[] = [];
   if (enabledStats.totalSpent) summaryTiles.push({ key: "totalSpent", icon: <DollarSign className="size-4" />, label: "Total Spent", value: `$${stats.totalSpent.toFixed(2)}` });
+  if (enabledStats.xpEarned && xpEarned > 0) summaryTiles.push({ key: "xpEarned", icon: <Zap className="size-4" />, label: "XP Earned", value: `${xpEarned} XP` });
   if (enabledStats.transactions) summaryTiles.push({ key: "transactions", icon: <Calendar className="size-4" />, label: "Transactions", value: String(stats.totalTransactions) });
   if (enabledStats.topCategory && categories.length > 0) summaryTiles.push({ key: "topCategory", icon: <ShoppingBag className="size-4" />, label: "Top Category", value: categories[0].name });
   if (enabledStats.funEquivalent && funEquivalent) summaryTiles.push({ key: "funEquivalent", icon: <span className="flex size-4 items-center justify-center text-sm leading-none">{funEquivalent.emoji}</span>, label: "Spent Enough For", value: `${funEquivalent.count} ${funEquivalent.label}` });
@@ -535,6 +540,7 @@ export function WrappedPage() {
   if (enabledStats.biggestPurchase && stats.biggestPurchase) summaryChips.push({ key: "biggestPurchase", label: "Biggest Purchase", value: stats.biggestPurchase.merchant });
   if (enabledStats.topMerchant && topMerchants.length > 0) summaryChips.push({ key: "topMerchant", label: "Top Merchant", value: topMerchants[0].name });
   if (enabledStats.mostPaid) summaryChips.push({ key: "mostPaid", label: "Most Paid To", value: stats.mostPaidPerson.name });
+  if (enabledStats.mostReliable && splitBillStats?.mostReliable) summaryChips.push({ key: "mostReliable", label: "Most Reliable", value: splitBillStats.mostReliable.name });
   if (enabledStats.biggestDebtor && splitBillStats?.biggestDebtor) summaryChips.push({ key: "biggestDebtor", label: "Biggest Debtor", value: splitBillStats.biggestDebtor.name });
   if (enabledStats.slowestPayer && splitBillStats?.slowestPayer) summaryChips.push({ key: "slowestPayer", label: "Slowest Payer", value: splitBillStats.slowestPayer.name });
   if (enabledStats.mostReminders && splitBillStats?.mostReminders) summaryChips.push({ key: "mostReminders", label: "Most Reminders", value: splitBillStats.mostReminders.name });
@@ -637,6 +643,19 @@ export function WrappedPage() {
             </WrappedSlide>
           )}
 
+          {slides[currentSlide] === "xp-earned" && xpEarned > 0 && (
+            <WrappedSlide key="xp-earned" gradient={G.orange} statKey="xpEarned" {...slideProps}>
+              <motion.div animate={{ rotate: [0, -12, 12, 0], scale: [1, 1.1, 1] }} transition={{ duration: 2, repeat: Infinity }} className="inline-block">
+                <Zap className="size-14 mb-4 mx-auto" fill="currentColor" />
+              </motion.div>
+              <p className="text-white/90 mb-3 text-lg">Every payment earned you XP</p>
+              <motion.div initial={{ scale: 0 }} animate={{ scale: [0, 1.15, 1] }} transition={{ duration: 0.6, times: [0, 0.7, 1] }} className="text-6xl mb-2 font-black drop-shadow-lg">
+                <CountUp value={xpEarned} decimals={0} />
+              </motion.div>
+              <p className="text-white/80 text-lg">XP earned in {monthName}</p>
+            </WrappedSlide>
+          )}
+
           {slides[currentSlide] === "transactions" && (
             <WrappedSlide key="transactions" gradient={G.purple} statKey="transactions" {...slideProps}>
               <Calendar className="size-14 mb-4 mx-auto" />
@@ -720,6 +739,16 @@ export function WrappedPage() {
               <p className="text-white/90 mb-4 text-lg">You paid the most to</p>
               <motion.h2 initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }} className="text-4xl mb-4">{stats.mostPaidPerson.name}</motion.h2>
               <p className="text-white/90 text-2xl">${stats.mostPaidPerson.amount.toFixed(2)}</p>
+            </WrappedSlide>
+          )}
+
+          {slides[currentSlide] === "most-reliable" && splitBillStats?.mostReliable && (
+            <WrappedSlide key="most-reliable" gradient={G.teal} statKey="mostReliable" {...slideProps}>
+              <ShieldCheck className="size-16 mb-6 mx-auto" />
+              <p className="text-white/90 mb-4 text-lg">Your most reliable split partner</p>
+              <motion.h2 initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }} className="text-4xl mb-4">{splitBillStats.mostReliable.name}</motion.h2>
+              <p className="text-white/90 text-2xl">{splitBillStats.mostReliable.score}% reliable</p>
+              <p className="text-white/70 text-sm mt-2">Always pays you back, fast 🙌</p>
             </WrappedSlide>
           )}
 

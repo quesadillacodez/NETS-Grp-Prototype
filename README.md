@@ -40,8 +40,9 @@
 
   App records use SQLite in the browser for fast local interaction and are
   synchronized through the authenticated `/api/sync/state` endpoint. A newer
-  server revision hydrates another device after sign-in. The server-side data
-  file must live on persistent encrypted storage in production.
+  server revision hydrates another device after sign-in. Vercel deployments
+  persist sessions, credential hashes and synchronized state in the connected
+  Redis integration; local development uses the ignored JSON data file.
 
   ## Local SQLite cache
 
@@ -74,9 +75,10 @@
   key isn't committed to source control. `.env` is git-ignored.
 
   Server-only variables must never use the `VITE_` prefix. For production, set
-  `NODE_ENV=production`, a 32-byte-or-longer `SESSION_SECRET`, `NETS_DATA_FILE`
-  on persistent storage, and the OTP provider values documented in
-  `server/README.md`. Build with `npm run build`, then run `npm start` behind
+  `NODE_ENV=production`, a 32-byte-or-longer `SESSION_SECRET`, the Redis
+  variables and the OTP provider values documented in `server/README.md`.
+  Vercel automatically deploys the Vite bundle and `api/index.mjs` from
+  `main`; other hosts can build with `npm run build` and run `npm start` behind
   HTTPS.
 
   ## Installable app

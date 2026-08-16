@@ -2,12 +2,18 @@ import { createServer as createHttpServer } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { Redis } from '@upstash/redis';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const IS_VERCEL = Boolean(process.env.VERCEL);
 const PORT = Number(process.env.PORT || 5173);
 const DATA_FILE = resolve(process.env.NETS_DATA_FILE || join(ROOT, 'server', 'data', 'auth-store.json'));
+const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const REDIS_STORE_KEY = process.env.NETS_REDIS_STORE_KEY || 'nets:prototype:auth-store:v1';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const OTP_TTL_MS = 5 * 60 * 1000;
 const RESET_TTL_MS = 10 * 60 * 1000;
@@ -21,9 +27,14 @@ const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString('h
 const EXPOSE_DEMO_OTP = !IS_PRODUCTION && process.env.EXPOSE_DEMO_OTP !== 'false';
 const SERVE_BUILD = IS_PRODUCTION || process.env.NETS_SERVE_BUILD === 'true';
 const rateWindows = new Map();
+const redis = REDIS_URL && REDIS_TOKEN ? new Redis({ url: REDIS_URL, token: REDIS_TOKEN }) : null;
 
 if (IS_PRODUCTION && !process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET is required in production. Use at least 32 random bytes.');
+}
+
+if (IS_VERCEL && !redis) {
+  throw new Error('Vercel requires KV_REST_API_URL and KV_REST_API_TOKEN (or the equivalent UPSTASH_REDIS_* variables).');
 }
 
 const DEVELOPMENT_DEMO_USERS = [
@@ -85,14 +96,14 @@ function safeEqualHex(left, right) {
 
 function makeInitialStore() {
   let seedUsers = DEVELOPMENT_DEMO_USERS;
-  if (IS_PRODUCTION) {
+  if (process.env.NETS_SEED_USERS_JSON) {
     try {
-      seedUsers = JSON.parse(process.env.NETS_SEED_USERS_JSON || '[]');
+      seedUsers = JSON.parse(process.env.NETS_SEED_USERS_JSON);
     } catch {
       throw new Error('NETS_SEED_USERS_JSON must be valid JSON.');
     }
     if (!Array.isArray(seedUsers) || seedUsers.length === 0 || seedUsers.some((user) => !user.id || !user.loginId || !/^\d{6}$/.test(user.pin))) {
-      throw new Error('A new production store requires NETS_SEED_USERS_JSON with valid users and six-digit initial PINs.');
+      throw new Error('NETS_SEED_USERS_JSON requires valid users with IDs, login IDs and six-digit initial PINs.');
     }
   }
   return {
@@ -106,8 +117,25 @@ function makeInitialStore() {
   };
 }
 
-function loadStore() {
-  if (process.env.RESET_DEMO_DATA === 'true' || !existsSync(DATA_FILE)) return makeInitialStore();
+function normalizeStoredValue(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+async function loadStore() {
+  if (process.env.RESET_DEMO_DATA === 'true') return makeInitialStore();
+  if (redis) {
+    const parsed = normalizeStoredValue(await redis.get(REDIS_STORE_KEY));
+    if (parsed?.version === 1) return parsed;
+    const initial = makeInitialStore();
+    await redis.set(REDIS_STORE_KEY, initial);
+    return initial;
+  }
+  if (!existsSync(DATA_FILE)) return makeInitialStore();
   try {
     const parsed = JSON.parse(readFileSync(DATA_FILE, 'utf8'));
     return parsed?.version === 1 ? parsed : makeInitialStore();
@@ -117,18 +145,27 @@ function loadStore() {
   }
 }
 
-let store = loadStore();
+let store;
+let persistenceQueue = Promise.resolve();
+let storeRequestQueue = Promise.resolve();
 
 function persist() {
+  if (!store) return;
+  const snapshot = structuredClone(store);
+  if (redis) {
+    persistenceQueue = persistenceQueue.then(() => redis.set(REDIS_STORE_KEY, snapshot));
+    return;
+  }
   mkdirSync(dirname(DATA_FILE), { recursive: true });
   const temporary = `${DATA_FILE}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(store, null, 2), { mode: 0o600 });
+  writeFileSync(temporary, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
   renameSync(temporary, DATA_FILE);
 }
 
-// Add newly introduced demo roles without resetting PINs or sessions belonging
-// to existing development accounts.
-if (!IS_PRODUCTION) {
+function ensureDemoUsers() {
+  // Add newly introduced demo roles without resetting PINs or sessions belonging
+  // to existing accounts. A custom production seed remains authoritative.
+  if (process.env.NETS_SEED_USERS_JSON) return;
   let addedDemoUser = false;
   for (const { pin, ...candidate } of DEVELOPMENT_DEMO_USERS) {
     if (store.users.some((user) => user.id === candidate.id)) continue;
@@ -150,6 +187,28 @@ function cleanExpired(now = Date.now()) {
     if (token.expiresAt <= now) { delete store.resetTokens[key]; changed = true; }
   }
   if (changed) persist();
+}
+
+async function prepareStore() {
+  await persistenceQueue;
+  // RESET_DEMO_DATA creates a clean store when the local test server starts;
+  // it must not erase the session again before the test's next request.
+  if (!(process.env.RESET_DEMO_DATA === 'true' && store)) store = await loadStore();
+  ensureDemoUsers();
+  cleanExpired();
+}
+
+async function flushPersistence() {
+  await persistenceQueue;
+}
+
+function runStoreRequest(work) {
+  // Fluid Compute may run concurrent requests in one function instance. The
+  // prototype stores one cohesive state document, so serialize its read/update
+  // cycle within an instance instead of letting two requests share `store`.
+  const result = storeRequestQueue.then(work, work);
+  storeRequestQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 function audit(type, details = {}) {
@@ -490,32 +549,56 @@ if (!SERVE_BUILD) {
   vite = await createServer({ root: ROOT, server: { middlewareMode: true }, appType: 'spa' });
 }
 
-persist();
-const server = createHttpServer(async (req, res) => {
+export async function handleRequest(req, res) {
   setSecurityHeaders(res);
   const url = new URL(req.url || '/', `http://${req.headers.host || `localhost:${PORT}`}`);
+  // Vercel sends every /api/* request to api/index.mjs through a rewrite. Keep
+  // one server router by restoring the original API path from that rewrite.
+  const rewrittenApiPath = url.pathname === '/api' ? url.searchParams.get('__path') : null;
+  if (rewrittenApiPath) url.pathname = `/api/${rewrittenApiPath.replace(/^\/+/, '')}`;
   try {
-    if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
+    if (url.pathname.startsWith('/api/')) {
+      return await runStoreRequest(async () => {
+        await prepareStore();
+        try {
+          return await handleApi(req, res, url);
+        } finally {
+          await flushPersistence();
+        }
+      });
+    }
     if (vite) return vite.middlewares(req, res, (error) => {
       if (error) { console.error(error); json(res, 500, { error: 'Development server error.' }); }
     });
     return serveProduction(req, res, url);
   } catch (error) {
+    if (res.headersSent) {
+      console.error(error);
+      return res.end();
+    }
     if (error?.message === 'PAYLOAD_TOO_LARGE') return json(res, 413, { error: 'Request payload is too large.' });
     if (error instanceof SyntaxError) return json(res, 400, { error: 'Invalid JSON request.' });
     console.error(error);
     return json(res, 500, { error: 'Unexpected server error.' });
   }
-});
-
-server.listen(PORT, '0.0.0.0', () => {
-  console.info(`NETS ${IS_PRODUCTION ? 'production' : 'development'} server listening on http://localhost:${PORT}`);
-  if (!IS_PRODUCTION && !process.env.SESSION_SECRET) console.info('Using an ephemeral development session secret.');
-});
-
-function shutdown() {
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 5_000).unref();
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+
+const IS_DIRECT_RUN = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+
+if (IS_DIRECT_RUN) {
+  await prepareStore();
+  await flushPersistence();
+  const server = createHttpServer(handleRequest);
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.info(`NETS ${IS_PRODUCTION ? 'production' : 'development'} server listening on http://localhost:${PORT}`);
+    if (!IS_PRODUCTION && !process.env.SESSION_SECRET) console.info('Using an ephemeral development session secret.');
+  });
+
+  function shutdown() {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 5_000).unref();
+  }
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}

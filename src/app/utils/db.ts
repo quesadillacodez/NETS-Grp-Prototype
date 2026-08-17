@@ -779,6 +779,48 @@ function tableColumnNames(table: string): string[] {
   return query(`PRAGMA table_info(${table})`).map(row => String(row.name));
 }
 
+export interface ColumnInfo {
+  name: string;
+  type: string;
+  primaryKey: boolean;
+  notNull: boolean;
+}
+
+/**
+ * A table's columns as SQLite itself reports them.
+ *
+ * Table names cannot be bound as parameters in a PRAGMA, so the name is checked
+ * against the real table list first and anything else is refused rather than
+ * interpolated.
+ */
+export function describeTable(table: string): ColumnInfo[] {
+  if (!listTables().includes(table)) return [];
+  return query(`PRAGMA table_info(${table})`).map(row => ({
+    name: String(row.name),
+    type: String(row.type || 'TEXT'),
+    primaryKey: Number(row.pk) > 0,
+    notNull: Number(row.notnull) === 1,
+  }));
+}
+
+/** Row count for a table, without reading the rows themselves. */
+export function countRows(table: string): number {
+  if (!listTables().includes(table)) return 0;
+  const row = queryOne(`SELECT COUNT(*) AS n FROM ${table}`);
+  return Number(row?.n ?? 0);
+}
+
+/** A page of a table's rows, newest rowid first so recent activity leads. */
+export function readTable(table: string, limit: number, offset = 0): Row[] {
+  if (!listTables().includes(table)) return [];
+  return query(`SELECT * FROM ${table} ORDER BY rowid DESC LIMIT ? OFFSET ?`, [limit, offset]);
+}
+
+/** The live database as a real SQLite file, for download or inspection. */
+export function exportDatabaseBytes(): Uint8Array {
+  return requireDb().export();
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;

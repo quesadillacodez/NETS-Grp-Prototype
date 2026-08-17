@@ -15,13 +15,13 @@ interface MobileFrameProps {
 const ROLE_HOME = { admin: '/admin', merchant: '/merchant', customer: '/' } as const;
 
 const ROLE_ALLOWED: Record<keyof typeof ROLE_HOME, string[] | null> = {
-  admin: ['/admin', '/manage-merchants'],
+  admin: ['/admin', '/manage-merchants', '/database'],
   merchant: ['/merchant'],
   // Customers may go anywhere that is not somebody else's portal.
   customer: null,
 };
 
-const PORTAL_PATHS = ['/admin', '/manage-merchants', '/merchant'];
+const PORTAL_PATHS = ['/admin', '/manage-merchants', '/merchant', '/database'];
 
 function RoleRedirectGuard() {
   const navigate = useNavigate();

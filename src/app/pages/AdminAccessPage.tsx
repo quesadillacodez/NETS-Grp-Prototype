@@ -6,6 +6,7 @@ import { Toaster } from '../components/ui/sonner';
 import {
   X, Shield, Users, TrendingUp, TrendingDown, DollarSign, UsersRound,
   RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap, LogOut,
+  Database,
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
 import { logout } from '../utils/authStorage';
@@ -506,7 +507,7 @@ export function AdminAccessPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-2">
               <button onClick={handleRefresh} className="bg-white rounded-xl p-3 flex flex-col items-center gap-2 border-2 border-border active:scale-95 transition-transform">
                 <RefreshCw size={18} className={`text-primary ${refreshing ? 'animate-spin' : ''}`} />
                 <span className="text-muted-foreground text-xs font-semibold">{refreshing ? 'Refreshing' : 'Refresh'}</span>
@@ -514,6 +515,10 @@ export function AdminAccessPage() {
               <button onClick={() => setShowUsers(true)} className="bg-white rounded-xl p-3 flex flex-col items-center gap-2 border-2 border-border active:scale-95 transition-transform">
                 <Users size={18} className="text-primary" />
                 <span className="text-muted-foreground text-xs font-semibold">Users</span>
+              </button>
+              <button onClick={() => navigate('/database')} className="bg-white rounded-xl p-3 flex flex-col items-center gap-2 border-2 border-border active:scale-95 transition-transform">
+                <Database size={18} className="text-primary" />
+                <span className="text-muted-foreground text-xs font-semibold">Database</span>
               </button>
             </div>
           </div>

@@ -37,6 +37,20 @@ test.describe('Compact phone (320px)', () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test('the database explorer fits at 320px, rows and all', async ({ page }) => {
+    await signIn(page, USERS.admin);
+    await expect(page.getByText('Management Portal')).toBeVisible();
+    await page.getByRole('button', { name: 'Database' }).click();
+    await expect(page.getByRole('heading', { name: 'Database' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    // A row card lays out long values — payment ids, timestamps — as wrapped
+    // text rather than pushing the page sideways.
+    await page.getByRole('button', { name: /item_sales/ }).click();
+    await expect(page.getByRole('heading', { name: 'Columns' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
   test('the customer wallet fits at 320px', async ({ page }) => {
     await signInAsCustomer(page, USERS.alex);
     await expectNoHorizontalOverflow(page);

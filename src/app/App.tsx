@@ -42,6 +42,7 @@ const SecurityPrivacyPage = lazy(() => import('./pages/SecurityPrivacyPage').the
 const HelpSupportPage = lazy(() => import('./pages/HelpSupportPage').then(m => ({ default: m.HelpSupportPage })));
 const MerchantPortalPage = lazy(() => import('./pages/MerchantPortalPage').then(m => ({ default: m.MerchantPortalPage })));
 const DemoControlsPage = lazy(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
+const DatabaseExplorerPage = lazy(() => import('./pages/DatabaseExplorerPage').then(m => ({ default: m.DatabaseExplorerPage })));
 
 import './utils/autoReminderScheduler';
 import './utils/voucherExpiryScheduler';
@@ -80,6 +81,7 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/wrapped/compare', Page: WrappedComparePage },
   { path: '/dashboard', Page: SpendingDashboardPage },
   { path: '/admin', Page: AdminAccessPage },
+  { path: '/database', Page: DatabaseExplorerPage },
   { path: '/merchant', Page: MerchantPortalPage },
 ];
 

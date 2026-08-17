@@ -5,6 +5,39 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Showing that the data is real
+
+A prototype's hardest claim to make from the outside is that it is not a set of
+hard-coded screens. `/admin` → **Database** answers it by showing the database
+instead of describing it.
+
+**Every table, live.** The list comes from `sqlite_master`, each table's columns
+from `PRAGMA table_info` and its rows from `SELECT *`. Nothing is enumerated by
+hand, so a table added next week appears without this page being touched. Each
+table carries a one-line note on what writes to it, row counts update while the
+page is open, and any row can be read field by field.
+
+**Derived, not stored.** Each account's wallet balance is shown as the sum that
+produces it — opening balance, the movement across N ledger rows, the result —
+and its XP as earned minus spent. Underneath, the page scans every column of
+every table for a `balance` or `xp` column and reports what it finds. That is a
+check run at render time rather than a promise: if a stored figure is ever added,
+the panel says so. The one stored amount, `cards.balance`, is named and
+explained — a prepaid card's float is its own holding, and every movement in or
+out of it is still a ledger transaction.
+
+**Nothing secret.** Credential columns are masked, and the page says why the
+`users.password` column is empty: PINs are hashed and held by the server, and
+are never written to the browser's copy. The whole database downloads as a real
+`.sqlite` file that opens in any SQL client.
+
+Admin-only, behind the same three-role guard as the portals. Six end-to-end
+tests, including one that pays for something as a customer and then finds that
+payment in the ledger's row count, and one that checks the balance on this screen
+equals the balance on Home.
+
+---
+
 ## One merchant side, not two
 
 Two merchant implementations landed independently: a stall portal on this

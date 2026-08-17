@@ -130,6 +130,12 @@ individual feature ownership clear:
   wallet cashback writes back to the same transaction ledger used by Home.
 - **Admin Portal (`/admin`):** management users can inspect live users and transactions,
   manage merchants, and maintain partner rewards that appear in the XP Rewards Store.
+- **Database explorer (`/admin` → Database):** every table in the running SQLite database with
+  its live row count, columns and rows, read through `PRAGMA table_info` and `SELECT *` rather
+  than a hand-written list. A "Derived, not stored" panel shows each account's wallet balance
+  and XP as the sum that produced them, and re-checks at render time that no `balance` or `xp`
+  column exists anywhere in the schema. Credential columns are masked and the whole database can
+  be downloaded as a real `.sqlite` file.
 - **Merchant portal (`/merchant`):** stalls sign in with their own accounts and see only
   their own trade — best-selling dish, every item ranked with its peak hour and week-on-week
   trend, an hourly chart, what is not selling, whether their rewards brought customers back,

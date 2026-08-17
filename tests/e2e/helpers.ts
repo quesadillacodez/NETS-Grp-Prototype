@@ -7,11 +7,14 @@ export interface TestUser {
   firstName: string;
 }
 
-export const USERS: Record<'alex' | 'sarah' | 'mike' | 'admin', TestUser> = {
+export const USERS: Record<'alex' | 'sarah' | 'mike' | 'admin' | 'kopitiam' | 'bubbletea', TestUser> = {
   alex:  { loginId: 'alexchen140896',  pin: '111111', name: 'Alex Chen',  firstName: 'Alex' },
   sarah: { loginId: 'sarahtan230394',  pin: '222222', name: 'Sarah Tan',  firstName: 'Sarah' },
   mike:  { loginId: 'mikewong081192',  pin: '333333', name: 'Mike Wong',  firstName: 'Mike' },
   admin: { loginId: 'admin010180',     pin: '888888', name: 'Admin',      firstName: 'Admin' },
+  // Merchant accounts: each signs in to its own stall's portal.
+  kopitiam:  { loginId: 'kopitiam090909',  pin: '555555', name: 'Kopitiam',       firstName: 'Kopitiam' },
+  bubbletea: { loginId: 'bubbletea070707', pin: '666666', name: 'Bubble Tea Bar', firstName: 'Bubble' },
 };
 
 /**
@@ -76,6 +79,18 @@ export async function signOut(page: Page): Promise<void> {
   }
   await profileTab.click();
   await page.getByRole('button', { name: 'Sign Out' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in securely' })).toBeVisible();
+}
+
+/** Sign in as a merchant and land on that stall's portal. */
+export async function signInAsMerchant(page: Page, user: TestUser): Promise<void> {
+  await signIn(page, user);
+  await expect(page.getByText('NETS for Business')).toBeVisible();
+}
+
+/** Sign out of the merchant portal. */
+export async function signOutOfMerchant(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Sign out of the merchant portal' }).click();
   await expect(page.getByRole('button', { name: 'Sign in securely' })).toBeVisible();
 }
 

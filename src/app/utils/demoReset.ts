@@ -1,4 +1,4 @@
-import { flushSave, run, syncDatabaseFilesNow } from './db';
+import { flushSave, lastInsertId, run, syncDatabaseFilesNow } from './db';
 import { addTransactions } from './transactionStorage';
 import { addReminders } from './reminderStorage';
 import { addNotification } from './notificationStorage';
@@ -65,6 +65,8 @@ export function clearActivityData(): void {
     DELETE FROM insights;
     DELETE FROM cards;
     DELETE FROM reward_promotions;
+    DELETE FROM item_sales;
+    DELETE FROM merchant_items;
   `);
   // Let the one-off demo history seed run again on the next reload.
   run("DELETE FROM app_meta WHERE key IN ('seeded-demo-history', 'user-cleared-fresh')");
@@ -78,6 +80,7 @@ export function clearActivityData(): void {
   // demo begins from the same card balances every time.
   window.dispatchEvent(new CustomEvent('cardsUpdated'));
   window.dispatchEvent(new CustomEvent('promotionsUpdated'));
+  window.dispatchEvent(new CustomEvent('menuUpdated'));
 }
 
 /**
@@ -287,8 +290,102 @@ export function loadPresentationScenario(): DemoScenarioSummary {
       daysAgo(3), daysAgo(-11), 148, daysAgo(3)],
   );
 
+  // ── Merchant menus and a fortnight of item-level sales ──
+  //
+  // This is what a stallholder logs in to see: not "$6.80 at Kopitiam" but
+  // "Nasi Lemak, 41 plates, mostly before 9am". Two weeks of history so the
+  // week-on-week trend on each dish has a baseline to compare against.
+  const MENUS: Record<string, {
+    merchantName: string;
+    items: { name: string; price: number; category: string; everyNDays: number; hours: number[] }[];
+  }> = {
+    kopi: {
+      merchantName: 'Kopitiam',
+      items: [
+        { name: 'Nasi Lemak',       price: 3.50, category: 'Mains',  everyNDays: 1, hours: [7, 8, 8] },
+        { name: 'Chicken Rice',     price: 4.50, category: 'Mains',  everyNDays: 2, hours: [12, 13] },
+        { name: 'Mee Goreng',       price: 4.00, category: 'Mains',  everyNDays: 3, hours: [12] },
+        { name: 'Kopi O',           price: 1.40, category: 'Drinks', everyNDays: 1, hours: [7, 15] },
+        { name: 'Teh Tarik',        price: 1.60, category: 'Drinks', everyNDays: 2, hours: [8] },
+        { name: 'Roti Prata (2pc)', price: 2.40, category: 'Mains',  everyNDays: 3, hours: [8] },
+        // Deliberately never sold, so the "not selling" panel has something
+        // true to say rather than being decoration.
+        { name: 'Milo Dinosaur',    price: 3.20, category: 'Drinks', everyNDays: 0, hours: [] },
+      ],
+    },
+    bubble: {
+      merchantName: 'Bubble Tea Bar',
+      items: [
+        { name: 'Brown Sugar Milk Tea', price: 5.40, category: 'Drinks',   everyNDays: 1, hours: [15, 19] },
+        { name: 'Classic Milk Tea',     price: 4.20, category: 'Drinks',   everyNDays: 2, hours: [16] },
+        { name: 'Matcha Latte',         price: 5.80, category: 'Drinks',   everyNDays: 3, hours: [16] },
+        { name: 'Egg Waffle',           price: 4.80, category: 'Desserts', everyNDays: 4, hours: [20] },
+      ],
+    },
+  };
+
+  // The seeded item sales are attributed to Sarah and Mike, so Alex's own
+  // curated history on the customer side stays exactly as the demo script
+  // expects it.
+  const STALL_CUSTOMERS = [SARAH, MIKE];
+  let itemSaleSeq = 0;
+  const itemTransactions: Parameters<typeof addTransactions>[0] = [];
+
+  for (const [merchantId, stall] of Object.entries(MENUS)) {
+    stall.items.forEach(item => {
+      run(
+        'INSERT INTO merchant_items (merchant_id, name, price, category, active, created_at) VALUES (?, ?, ?, ?, 1, ?)',
+        [merchantId, item.name, item.price, item.category, daysAgo(30)],
+      );
+      const itemId = lastInsertId();
+      if (item.everyNDays === 0) return;
+
+      // A fortnight of trade at this item's own busy hours, so the hourly chart
+      // and each dish's peak hour describe a real pattern. Sales tick up in the
+      // most recent week, which is what the week-on-week trend compares.
+      for (let day = 13; day >= 0; day--) {
+        if (day % item.everyNDays !== 0) continue;
+        const timesToday = day < 7 ? item.hours.length : Math.max(1, item.hours.length - 1);
+
+        for (let n = 0; n < timesToday; n++) {
+          const when = new Date(daysAgo(day));
+          when.setHours(item.hours[n % item.hours.length], (n * 17) % 60, 0, 0);
+          itemSaleSeq += 1;
+
+          const paymentId = `DEMO-ITEM-${itemSaleSeq}`;
+          const buyer = STALL_CUSTOMERS[itemSaleSeq % STALL_CUSTOMERS.length];
+
+          run(
+            `INSERT OR IGNORE INTO item_sales
+              (payment_id, merchant_id, item_id, name, unit_price, quantity, user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+            [paymentId, merchantId, itemId, item.name, item.price, buyer, when.getTime()],
+          );
+
+          // Every item sale is also a payment. Seeding one without the other
+          // would leave the stall's takings disagreeing with its own menu
+          // report, which is exactly the kind of split truth this codebase
+          // avoids everywhere else.
+          itemTransactions.push({
+            userId: buyer,
+            name: stall.merchantName,
+            amount: -item.price,
+            date: labelDaysAgo(day),
+            category: 'Food & Dining',
+            kind: 'purchase' as const,
+            paymentId,
+            createdAt: when.getTime(),
+          });
+        }
+      }
+    });
+  }
+  addTransactions(itemTransactions);
+
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
   window.dispatchEvent(new CustomEvent('promotionsUpdated'));
+  window.dispatchEvent(new CustomEvent('menuUpdated'));
+  window.dispatchEvent(new CustomEvent('itemSalesUpdated'));
 
   syncDatabaseFilesNow();
 

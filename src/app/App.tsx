@@ -40,6 +40,7 @@ const PersonalInformationPage = lazy(() => import('./pages/PersonalInformationPa
 const PaymentMethodsPage = lazy(() => import('./pages/PaymentMethodsPage').then(m => ({ default: m.PaymentMethodsPage })));
 const SecurityPrivacyPage = lazy(() => import('./pages/SecurityPrivacyPage').then(m => ({ default: m.SecurityPrivacyPage })));
 const HelpSupportPage = lazy(() => import('./pages/HelpSupportPage').then(m => ({ default: m.HelpSupportPage })));
+const MerchantPortalPage = lazy(() => import('./pages/MerchantPortalPage').then(m => ({ default: m.MerchantPortalPage })));
 const DemoControlsPage = lazy(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
 
 import './utils/autoReminderScheduler';
@@ -78,6 +79,7 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/wrapped/compare', Page: WrappedComparePage },
   { path: '/dashboard', Page: SpendingDashboardPage },
   { path: '/admin', Page: AdminAccessPage },
+  { path: '/merchant', Page: MerchantPortalPage },
 ];
 
 function PageLoading() {

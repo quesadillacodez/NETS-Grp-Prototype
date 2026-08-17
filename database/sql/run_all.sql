@@ -303,3 +303,27 @@ CREATE TABLE IF NOT EXISTS reward_promotions (
   impressions INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER
 );
+
+-- ---------- merchant_items ----------
+CREATE TABLE IF NOT EXISTS merchant_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  price       REAL NOT NULL,
+  category    TEXT,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER
+);
+
+-- ---------- item_sales ----------
+CREATE TABLE IF NOT EXISTS item_sales (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id  TEXT NOT NULL,
+  merchant_id TEXT NOT NULL,
+  item_id     INTEGER NOT NULL,
+  name        TEXT NOT NULL,
+  unit_price  REAL NOT NULL,
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  user_id     TEXT,
+  created_at  INTEGER NOT NULL
+);

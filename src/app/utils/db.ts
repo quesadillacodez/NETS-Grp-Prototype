@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS users (
   email                     TEXT,
   password                  TEXT,
   is_admin                  INTEGER DEFAULT 0,
+  merchant_id               TEXT,
   reminder_frequency        TEXT DEFAULT 'daily',
   auto_reminders_enabled    INTEGER DEFAULT 1,
   last_auto_reminder_sent   TEXT,
@@ -161,6 +162,40 @@ CREATE INDEX IF NOT EXISTS idx_cards_user ON cards(user_id);
 -- currently only the customer's chosen Quick Actions. Kept in the database
 -- because they belong to the account; the demo location is deliberately not
 -- here, being a property of the device rather than the customer.
+-- What a merchant sells. A menu turns "$6.80 at Kopitiam" into "one Nasi
+-- Lemak", which is what makes a stallholder's dashboard worth opening.
+CREATE TABLE IF NOT EXISTS merchant_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  price       REAL NOT NULL,
+  category    TEXT,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_items ON merchant_items(merchant_id);
+
+-- One line of a sale. The item's name and price are copied in rather than
+-- joined, so renaming a menu item or changing its price never rewrites the
+-- history of what was actually sold for how much.
+--
+-- Keyed by the payment id the QR flow already generates: the unique index makes
+-- recording a sale idempotent, the same guard that stops a duplicate payment
+-- being written twice.
+CREATE TABLE IF NOT EXISTS item_sales (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id  TEXT NOT NULL,
+  merchant_id TEXT NOT NULL,
+  item_id     INTEGER NOT NULL,
+  name        TEXT NOT NULL,
+  unit_price  REAL NOT NULL,
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  user_id     TEXT,
+  created_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_item_sales_payment ON item_sales(payment_id, item_id);
+CREATE INDEX IF NOT EXISTS idx_item_sales_merchant ON item_sales(merchant_id, created_at);
+
 -- Paid placement in the rewards store. A merchant books a slot for a window at
 -- a weekly rate; the fee owed and the redemptions it drove are both derived
 -- from this row rather than stored, so a report can never disagree with the
@@ -407,6 +442,11 @@ export async function initDatabase(): Promise<void> {
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
     if (!names.includes('is_admin')) {
       db.run('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
+    }
+    // A merchant account is a user tied to one merchant. Null for customers and
+    // for the management account, which is what makes the role unambiguous.
+    if (!names.includes('merchant_id')) {
+      db.run('ALTER TABLE users ADD COLUMN merchant_id TEXT');
     }
   } catch (e) {
     console.warn('users.is_admin migration skipped:', e);

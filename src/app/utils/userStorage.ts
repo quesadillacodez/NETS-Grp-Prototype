@@ -12,6 +12,8 @@ export interface User {
   email?: string;
   password?: string;
   isAdmin?: boolean;
+  /** Set on a merchant account: the merchant whose stall this user runs. */
+  merchantId?: string;
   reminderFrequency?: ReminderFrequency;
   autoRemindersEnabled?: boolean;
   lastAutoReminderSent?: string;
@@ -27,6 +29,10 @@ const DEFAULT_USERS: User[] = [
   { id: '3', loginId: 'mikewong081192', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789', password: '333333' },
   { id: '4', loginId: 'jennylim170797', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890', password: '444444' },
   { id: 'admin', loginId: 'admin010180', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true, password: '888888' },
+  // Merchant accounts. Each is tied to one merchant and sees only that stall's
+  // takings — the same portal, scoped to whoever signed in.
+  { id: 'm-kopi', loginId: 'kopitiam090909', name: 'Kopitiam', avatar: '☕', phone: 'Merchant · Toa Payoh', merchantId: 'kopi', password: '555555' },
+  { id: 'm-bubble', loginId: 'bubbletea070707', name: 'Bubble Tea Bar', avatar: '🧋', phone: 'Merchant · Orchard', merchantId: 'bubble', password: '666666' },
 ];
 
 function rowToUser(r: Record<string, any>): User {
@@ -39,6 +45,7 @@ function rowToUser(r: Record<string, any>): User {
     email: r.email ?? undefined,
     password: r.password ?? undefined,
     isAdmin: r.is_admin === 1,
+    merchantId: r.merchant_id ?? undefined,
     reminderFrequency: r.reminder_frequency ?? undefined,
     autoRemindersEnabled: r.auto_reminders_enabled == null ? undefined : r.auto_reminders_enabled === 1,
     lastAutoReminderSent: r.last_auto_reminder_sent ?? undefined,
@@ -53,8 +60,9 @@ function seedDefaultUsersIfEmpty(): void {
 
   if (!hasUsers) {
     for (const u of DEFAULT_USERS) {
-      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null, u.isAdmin ? 1 : 0]);
+      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null,
+          u.isAdmin ? 1 : 0, u.merchantId ?? null]);
     }
     return;
   }
@@ -65,6 +73,18 @@ function seedDefaultUsersIfEmpty(): void {
     const a = DEFAULT_USERS.find(u => u.id === 'admin')!;
     run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [a.id, a.loginId ?? null, a.name, a.avatar, a.phone, a.email ?? null, a.password ?? null, 1]);
+  }
+
+  for (const u of DEFAULT_USERS.filter(candidate => candidate.merchantId)) {
+    const existing = queryOne('SELECT id FROM users WHERE id = ?', [u.id]);
+    if (!existing) {
+      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
+        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null, u.merchantId ?? null]);
+    } else {
+      // An older row may predate the column; make sure the link is set.
+      run('UPDATE users SET merchant_id = ? WHERE id = ? AND (merchant_id IS NULL OR merchant_id = \'\')',
+        [u.merchantId ?? null, u.id]);
+    }
   }
 
   // Keep login IDs in sync for databases created by earlier builds. Only fill a
@@ -201,7 +221,23 @@ export function isAdminUser(user?: User): boolean {
   return u.isAdmin === true || u.id === 'admin';
 }
 
-// Only non-admin accounts should appear as payable/selectable contacts.
+/** A merchant account runs one stall and sees only that stall's data. */
+export function isMerchantUser(user?: User): boolean {
+  const u = user ?? getCurrentUser();
+  return !isAdminUser(u) && typeof u.merchantId === 'string' && u.merchantId.length > 0;
+}
+
+export type AccountRole = 'admin' | 'merchant' | 'customer';
+
+export function roleOf(user?: User): AccountRole {
+  const u = user ?? getCurrentUser();
+  if (isAdminUser(u)) return 'admin';
+  if (isMerchantUser(u)) return 'merchant';
+  return 'customer';
+}
+
+// Only customer accounts are people you can split a bill with. The management
+// account and the merchant stalls are not contacts.
 export function getPayableUsers(): User[] {
-  return getAllUsers().filter(u => !u.isAdmin);
+  return getAllUsers().filter(u => roleOf(u) === 'customer');
 }

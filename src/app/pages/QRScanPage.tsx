@@ -12,6 +12,7 @@ import {
   type NetsQrRequestResult,
 } from '../utils/netsQr';
 import { getMerchants, type Merchant } from '../utils/merchantStorage';
+import { getSellableMenu, recordItemSale, type MenuItem } from '../utils/menuStorage';
 import { payHangout } from '../utils/hangoutStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { createPaymentId, resolvePaymentCategory, type PaymentFlowContext } from '../utils/paymentFlow';
@@ -34,7 +35,7 @@ export function QRScanPage() {
   const [merchantName, setMerchantName] = useState(() => incoming?.merchantName ?? '');
   const [reference, setReference] = useState(() => incoming?.reference ?? '');
 
-  const [merchants, setMerchants] = useState<Merchant[]>([]);
+  const [merchants, setMerchants] = useState<Merchant[]>(() => getMerchants());
 
   useAppEvents(['merchantsUpdated'], () => setMerchants(getMerchants()));
 
@@ -45,6 +46,24 @@ export function QRScanPage() {
 
   const [generatedAmount, setGeneratedAmount] = useState(0);
   const [generatedMerchant, setGeneratedMerchant] = useState('');
+
+  // When the merchant keeps a menu, the customer says what they bought. That is
+  // what turns "$6.80 at Kopitiam" into "one Nasi Lemak" on the stall's own
+  // dashboard. Merchants with no menu are unaffected.
+  const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
+  const [chosenItem, setChosenItem] = useState<MenuItem | null>(null);
+  const menu = selectedMerchantId ? getSellableMenu(selectedMerchantId) : [];
+
+  /** Record what the payment was for, once the payment itself is written. */
+  const recordItemIfChosen = () => {
+    if (!chosenItem || !selectedMerchantId) return;
+    recordItemSale({
+      paymentId,
+      merchantId: selectedMerchantId,
+      item: chosenItem,
+      userId: getCurrentUser().id,
+    });
+  };
 
   const [showPopup, setShowPopup] = useState(false);
 
@@ -101,10 +120,26 @@ export function QRScanPage() {
     setAmount(preset.amount.toFixed(2));
     setMerchantName(preset.name);
     setReference(preset.reference ?? '');
+    setSelectedMerchantId(preset.id);
+    setChosenItem(null);
+  };
+
+  /** Picking a dish sets the amount to its price. */
+  const chooseItem = (item: MenuItem) => {
+    setChosenItem(item);
+    setAmount(item.price.toFixed(2));
+    setReference(item.name);
+    setError(null);
   };
 
   const simulateScan = () => {
     if (incoming?.hangoutId && amount && merchantName) {
+      handleGenerate(parseFloat(amount), merchantName, reference);
+      return;
+    }
+    // A stall picked by hand — with a dish, where the stall keeps a menu — is an
+    // explicit choice. Randomising over it would throw that choice away.
+    if (selectedMerchantId && merchantName && amount) {
       handleGenerate(parseFloat(amount), merchantName, reference);
       return;
     }
@@ -236,6 +271,50 @@ export function QRScanPage() {
                   <p className="shrink-0 text-2xl font-black">${Number(amount).toFixed(2)}</p>
                 </div>
                 <p className="mt-2 text-[10px] text-white/55">Final merchant amount can still be confirmed at payment.</p>
+              </div>
+            )}
+
+            {!incoming?.hangoutId && merchants.length > 0 && (
+              <div className="mb-5 w-full text-left">
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-white/55">
+                  Or pick a stall to pay
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {merchants.map(entry => (
+                    <button
+                      key={entry.id}
+                      onClick={() => applyPreset(entry)}
+                      aria-pressed={selectedMerchantId === entry.id}
+                      className={`min-h-11 rounded-xl px-3 text-xs font-bold ${selectedMerchantId === entry.id ? 'bg-white text-foreground' : 'bg-white/10 text-white'}`}
+                    >
+                      {entry.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {menu.length > 0 && !incoming?.hangoutId && (
+              <div className="mb-5 w-full rounded-2xl border border-white/20 bg-white/10 p-4 text-left">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-white/55">
+                  What are you buying at {merchantName}?
+                </p>
+                <div className="mt-2 grid gap-1.5">
+                  {menu.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => chooseItem(item)}
+                      aria-pressed={chosenItem?.id === item.id}
+                      className={`flex min-h-11 items-center justify-between gap-2 rounded-xl px-3 text-left text-xs font-bold ${chosenItem?.id === item.id ? 'bg-white text-foreground' : 'bg-white/10 text-white'}`}
+                    >
+                      <span className="min-w-0 truncate">{item.name}</span>
+                      <span className="flex-shrink-0">${item.price.toFixed(2)}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-white/55">
+                  Telling the stall what you bought is what lets them see which dishes sell.
+                </p>
               </div>
             )}
 
@@ -390,6 +469,7 @@ export function QRScanPage() {
                     );
                     // If this payment was for a hangout activity, mark it paid so
                     // it can't be paid again and shows its ticket next time.
+                    recordItemIfChosen();
                     if (incoming?.hangoutId != null) payHangout(incoming.hangoutId);
                     navigate('/');
                   }}

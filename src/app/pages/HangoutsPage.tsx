@@ -30,7 +30,7 @@ import {
   type ActivityCategory,
   type Hangout,
 } from '../utils/hangoutStorage';
-import { getAllUsers, getCurrentUser } from '../utils/userStorage';
+import { getPayableUsers, getAllUsers, getCurrentUser } from '../utils/userStorage';
 import { getContactGroups, createContactGroup, deleteContactGroup, type ContactGroup } from '../utils/groupStorage';
 import {
   DEFAULT_NEARBY_RADIUS_KM, NEARBY_RADIUS_OPTIONS_KM, byDistance, getUserArea,
@@ -169,7 +169,7 @@ function CreateHangoutSheet({ initialIds, activities, ownerId, onCreated, onClos
   onCreated: (id: number) => void;
   onClose: () => void;
 }) {
-  const contacts = getAllUsers().filter(user => !user.isAdmin && user.id !== ownerId);
+  const contacts = getPayableUsers().filter(user => user.id !== ownerId);
   const [name, setName] = useState('Weekend Catch-up');
   const [date, setDate] = useState(tomorrow());
   const [budget, setBudget] = useState('40');

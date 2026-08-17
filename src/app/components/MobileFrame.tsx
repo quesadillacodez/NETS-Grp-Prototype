@@ -1,6 +1,6 @@
 import { ReactNode, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { getCurrentUser, isAdminUser } from '../utils/userStorage';
+import { getCurrentUser, roleOf } from '../utils/userStorage';
 import { isLoggedIn } from '../utils/authStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 
@@ -9,25 +9,36 @@ interface MobileFrameProps {
   requiresAuth?: boolean;
 }
 
-// Pages an admin IS allowed to stay on. Everything else redirects to /admin.
-const ADMIN_ALLOWED = ['/admin', '/manage-merchants'];
+// Each role has a home and the set of pages it may stay on. Anything else
+// redirects, so signing in as a merchant can never land on the customer wallet
+// and a customer can never reach a portal.
+const ROLE_HOME = { admin: '/admin', merchant: '/merchant', customer: '/' } as const;
 
-function AdminRedirectGuard() {
+const ROLE_ALLOWED: Record<keyof typeof ROLE_HOME, string[] | null> = {
+  admin: ['/admin', '/manage-merchants'],
+  merchant: ['/merchant'],
+  // Customers may go anywhere that is not somebody else's portal.
+  customer: null,
+};
+
+const PORTAL_PATHS = ['/admin', '/manage-merchants', '/merchant'];
+
+function RoleRedirectGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [tick, setTick] = useState(0);
   useAppEvents(['userSwitched', 'databaseReady', 'sessionChanged'], () => setTick((t) => t + 1));
 
-  const admin = isAdminUser(getCurrentUser());
+  const role = roleOf(getCurrentUser());
   const path = location.pathname;
+  const allowed = ROLE_ALLOWED[role];
 
-  // Admin on a normal user page → send to the portal.
-  if (admin && !ADMIN_ALLOWED.includes(path) && path !== '/admin') {
-    queueMicrotask(() => navigate('/admin', { replace: true }));
-  }
-  // Non-admin who ended up on an admin-only page (e.g. just switched away from
-  // the admin account inside the portal) → send back to home.
-  if (!admin && (path === '/admin' || path === '/manage-merchants')) {
+  if (allowed) {
+    // A portal account outside its own pages goes back to its portal.
+    if (!allowed.includes(path)) queueMicrotask(() => navigate(ROLE_HOME[role], { replace: true }));
+  } else if (PORTAL_PATHS.includes(path)) {
+    // A customer who ended up on a portal page (e.g. after switching account
+    // from inside one) goes home.
     queueMicrotask(() => navigate('/', { replace: true }));
   }
   void tick;
@@ -46,7 +57,7 @@ function SessionGuard() {
 
   if (isLoggedIn()) {
     wasLoggedIn.current = true;
-    return <AdminRedirectGuard />;
+    return <RoleRedirectGuard />;
   }
 
   // An in-app sign-out (the user WAS authenticated a moment ago, within this

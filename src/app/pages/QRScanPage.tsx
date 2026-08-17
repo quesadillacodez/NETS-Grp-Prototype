@@ -16,6 +16,7 @@ import { getSellableMenu, recordItemSale, type MenuItem } from '../utils/menuSto
 import { payHangout } from '../utils/hangoutStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { createPaymentId, resolvePaymentCategory, type PaymentFlowContext } from '../utils/paymentFlow';
+import { recordMerchantSale } from '../utils/merchantInsightStorage';
 
 interface ScanState extends Partial<PaymentFlowContext> {
   amount?: number;
@@ -456,6 +457,7 @@ export function QRScanPage() {
                 </button>
                 <button
                   onClick={() => {
+                    const currentUser = getCurrentUser();
                     addTransaction(
                       {
                         name: generatedMerchant,
@@ -465,8 +467,15 @@ export function QRScanPage() {
                         kind: 'purchase',
                         paymentId,
                       },
-                      getCurrentUser().id
+                      currentUser.id
                     );
+                    recordMerchantSale({
+                      merchantName: generatedMerchant,
+                      itemName: reference || incoming?.reference,
+                      amount: generatedAmount,
+                      userId: currentUser.id,
+                      paymentId,
+                    });
                     // If this payment was for a hangout activity, mark it paid so
                     // it can't be paid again and shows its ticket next time.
                     recordItemIfChosen();

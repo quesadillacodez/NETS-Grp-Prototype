@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS notifications (
   timestamp        TEXT NOT NULL,
   read             INTEGER DEFAULT 0,
   reminder_id      INTEGER,
+  channel          TEXT,
+  link             TEXT,
+  -- Set once the push banner for this notification has been dismissed with its
+  -- (x) button, so it never pops back up on another page or app reopen. Distinct
+  -- from `read`: dismissing the banner does not clear it from the Notification
+  -- Centre.
+  banner_dismissed INTEGER DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

@@ -3,6 +3,8 @@ import { query, queryOne, run } from './db';
 export type ReminderFrequency =
   | 'hourly' | '3hours' | '5hours' | '12hours' | 'daily' | '48hours' | 'weekly' | 'custom';
 
+export type UserRole = 'customer' | 'admin' | 'merchant';
+
 export interface User {
   id: string;
   loginId?: string;
@@ -10,8 +12,8 @@ export interface User {
   avatar: string;
   phone: string;
   email?: string;
-  password?: string;
   isAdmin?: boolean;
+  role?: UserRole;
   /** Set on a merchant account: the merchant whose stall this user runs. */
   merchantId?: string;
   reminderFrequency?: ReminderFrequency;
@@ -24,15 +26,17 @@ export interface User {
 const CURRENT_USER_KEY = 'nets-current-user-id';
 
 const DEFAULT_USERS: User[] = [
-  { id: '1', loginId: 'alexchen140896', name: 'Alex Chen', avatar: '👨‍💼', phone: '+65 9123 4567', password: '111111' },
-  { id: '2', loginId: 'sarahtan230394', name: 'Sarah Tan', avatar: '👩', phone: '+65 9234 5678', password: '222222' },
-  { id: '3', loginId: 'mikewong081192', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789', password: '333333' },
-  { id: '4', loginId: 'jennylim170797', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890', password: '444444' },
-  { id: 'admin', loginId: 'admin010180', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true, password: '888888' },
+  { id: '1', loginId: 'alexchen140896', name: 'Alex Chen', avatar: '👨‍💼', phone: '+65 9123 4567' },
+  { id: '2', loginId: 'sarahtan230394', name: 'Sarah Tan', avatar: '👩', phone: '+65 9234 5678' },
+  { id: '3', loginId: 'mikewong081192', name: 'Mike Wong', avatar: '👨', phone: '+65 9345 6789' },
+  { id: '4', loginId: 'jennylim170797', name: 'Jenny Lim', avatar: '👩‍🦰', phone: '+65 9456 7890' },
+  { id: 'admin', loginId: 'admin010180', name: 'Admin (Management)', avatar: '🛡️', phone: 'Management Portal', isAdmin: true, role: 'admin' },
   // Merchant accounts. Each is tied to one merchant and sees only that stall's
-  // takings — the same portal, scoped to whoever signed in.
-  { id: 'm-kopi', loginId: 'kopitiam090909', name: 'Kopitiam', avatar: '☕', phone: 'Merchant · Toa Payoh', merchantId: 'kopi', password: '555555' },
-  { id: 'm-bubble', loginId: 'bubbletea070707', name: 'Bubble Tea Bar', avatar: '🧋', phone: 'Merchant · Orchard', merchantId: 'bubble', password: '666666' },
+  // takings — the same portal, scoped to whoever signed in. A second stall
+  // exists so the isolation between them is something the app can demonstrate
+  // rather than assert. PINs live on the server, never here.
+  { id: 'merchant-kopi', loginId: 'kopitiammerchant', name: 'Kopitiam', avatar: '☕', phone: 'Merchant · Toa Payoh', role: 'merchant', merchantId: 'kopi' },
+  { id: 'merchant-bubble', loginId: 'bubbletea070707', name: 'Bubble Tea Bar', avatar: '🧋', phone: 'Merchant · Orchard', role: 'merchant', merchantId: 'bubble' },
 ];
 
 function rowToUser(r: Record<string, any>): User {
@@ -43,9 +47,9 @@ function rowToUser(r: Record<string, any>): User {
     avatar: r.avatar,
     phone: r.phone,
     email: r.email ?? undefined,
-    password: r.password ?? undefined,
     isAdmin: r.is_admin === 1,
-    merchantId: r.merchant_id ?? undefined,
+    role: (r.role as UserRole | null) ?? (r.is_admin === 1 ? 'admin' : 'customer'),
+    merchantId: r.merchant_id == null ? undefined : String(r.merchant_id),
     reminderFrequency: r.reminder_frequency ?? undefined,
     autoRemindersEnabled: r.auto_reminders_enabled == null ? undefined : r.auto_reminders_enabled === 1,
     lastAutoReminderSent: r.last_auto_reminder_sent ?? undefined,
@@ -60,43 +64,26 @@ function seedDefaultUsersIfEmpty(): void {
 
   if (!hasUsers) {
     for (const u of DEFAULT_USERS) {
-      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null,
-          u.isAdmin ? 1 : 0, u.merchantId ?? null]);
+      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, role, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, null, u.isAdmin ? 1 : 0, u.role ?? 'customer', u.merchantId ?? null]);
     }
     return;
   }
 
   // Existing DB (created before the Admin account) — make sure Admin exists.
-  const admin = queryOne('SELECT id FROM users WHERE id = ?', ['admin']);
-  if (!admin) {
-    const a = DEFAULT_USERS.find(u => u.id === 'admin')!;
-    run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [a.id, a.loginId ?? null, a.name, a.avatar, a.phone, a.email ?? null, a.password ?? null, 1]);
-  }
-
-  for (const u of DEFAULT_USERS.filter(candidate => candidate.merchantId)) {
-    const existing = queryOne('SELECT id FROM users WHERE id = ?', [u.id]);
-    if (!existing) {
-      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
-        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, u.password ?? null, u.merchantId ?? null]);
-    } else {
-      // An older row may predate the column; make sure the link is set.
-      run('UPDATE users SET merchant_id = ? WHERE id = ? AND (merchant_id IS NULL OR merchant_id = \'\')',
-        [u.merchantId ?? null, u.id]);
-    }
-  }
-
-  // Keep login IDs in sync for databases created by earlier builds. Only fill a
-  // missing PIN so a PIN changed through account recovery remains valid.
+  // Keep public login IDs in sync and scrub credentials left by older builds.
+  // Authentication secrets now live exclusively on the server.
   for (const u of DEFAULT_USERS) {
     const row = queryOne('SELECT login_id, password FROM users WHERE id = ?', [u.id]);
-    if (row && row.login_id !== u.loginId) {
+    if (!row) {
+      run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, role, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.loginId ?? null, u.name, u.avatar, u.phone, u.email ?? null, null, u.isAdmin ? 1 : 0, u.role ?? 'customer', u.merchantId ?? null]);
+    } else if (row.login_id !== u.loginId) {
       run('UPDATE users SET login_id = ? WHERE id = ?', [u.loginId ?? null, u.id]);
     }
-    if (row && !row.password && u.password) {
-      run('UPDATE users SET password = ? WHERE id = ?', [u.password, u.id]);
-    }
+    run('UPDATE users SET role = ?, merchant_id = ? WHERE id = ?',
+      [u.role ?? (u.isAdmin ? 'admin' : 'customer'), u.merchantId ?? null, u.id]);
+    if (row?.password) run('UPDATE users SET password = NULL WHERE id = ?', [u.id]);
   }
 }
 
@@ -122,13 +109,9 @@ export function switchUser(userId: string): void {
 }
 
 export function addUser(user: Omit<User, 'id'>): void {
-  run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  run('INSERT INTO users (id, login_id, name, avatar, phone, email, password, is_admin, role, merchant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [Date.now().toString(), user.loginId ?? null, user.name, user.avatar, user.phone,
-      user.email ?? null, user.password ?? null, user.isAdmin ? 1 : 0]);
-}
-
-export function updateUserPin(userId: string, pin: string): void {
-  run('UPDATE users SET password = ? WHERE id = ?', [pin, userId]);
+      user.email ?? null, null, user.isAdmin ? 1 : 0, user.role ?? 'customer', user.merchantId ?? null]);
 }
 
 export interface ProfileUpdate {
@@ -154,11 +137,6 @@ export function updateUserProfile(userId: string, update: ProfileUpdate): void {
 /** A 6-digit PIN, matching the format issued at sign-up and by PIN recovery. */
 export function isValidPin(pin: string): boolean {
   return /^\d{6}$/.test(pin);
-}
-
-export function verifyUserPin(userId: string, pin: string): boolean {
-  const row = queryOne('SELECT password FROM users WHERE id = ?', [userId]);
-  return !!row && row.password === pin;
 }
 
 export function updateUserReminderSettings(
@@ -218,17 +196,23 @@ export function updateLastAutoReminderSent(userId: string): void {
 
 export function isAdminUser(user?: User): boolean {
   const u = user ?? getCurrentUser();
-  return u.isAdmin === true || u.id === 'admin';
+  return u.role === 'admin' || u.isAdmin === true || u.id === 'admin';
 }
 
-/** A merchant account runs one stall and sees only that stall's data. */
 export function isMerchantUser(user?: User): boolean {
   const u = user ?? getCurrentUser();
-  return !isAdminUser(u) && typeof u.merchantId === 'string' && u.merchantId.length > 0;
+  return u.role === 'merchant' && Boolean(u.merchantId);
+}
+
+export function getUserHomePath(user: User): string {
+  if (isAdminUser(user)) return '/admin';
+  if (isMerchantUser(user)) return '/merchant';
+  return '/';
 }
 
 export type AccountRole = 'admin' | 'merchant' | 'customer';
 
+/** One place that answers what kind of account is signed in. */
 export function roleOf(user?: User): AccountRole {
   const u = user ?? getCurrentUser();
   if (isAdminUser(u)) return 'admin';

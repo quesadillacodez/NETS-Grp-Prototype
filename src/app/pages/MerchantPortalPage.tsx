@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  BarChart3, Clock3, Flame, LogOut, Megaphone, Plus, Repeat, Store, Trash2, TrendingDown,
-  TrendingUp, UserPlus, Users, Utensils, X, Zap,
+  BarChart3, Clock3, Download, Flame, Lightbulb, LogOut, Megaphone, Plus, Repeat, ShieldCheck,
+  Sparkles, Store, TicketCheck, Trash2, TrendingDown, TrendingUp, UserPlus, Users, Utensils, X, Zap,
 } from 'lucide-react';
 import { getCurrentUser } from '../utils/userStorage';
 import { logout } from '../utils/authStorage';
-import { getMerchants } from '../utils/merchantStorage';
+import { getMerchants, saveMerchant, type Merchant } from '../utils/merchantStorage';
 import { getMerchantInsight } from '../utils/merchantInsights';
+import { getMerchantDashboard, type MerchantDashboardData } from '../utils/merchantInsightStorage';
 import {
   MENU_CATEGORIES, addMenuItem, getHourlyPattern, getItemPerformance, getMenu, getSlowMovers,
   removeMenuItem, setMenuItemActive, type ItemPerformance, type MenuItem,
@@ -53,6 +54,12 @@ export function MerchantPortalPage() {
   const insight = useMemo(() => getMerchantInsight(merchantName), [merchantName, tick]);
   const items = useMemo(() => getItemPerformance(merchantId), [merchantId, tick]);
   const hours = useMemo(() => getHourlyPattern(merchantId), [merchantId, tick]);
+  // The stall-level view — seven-day trend, dayparts and the suggestions that
+  // come out of them — reads the same item_sales rows as the per-dish view.
+  const dashboard = useMemo(
+    () => (merchant ? getMerchantDashboard(merchant) : null),
+    [merchant, tick],
+  );
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -91,10 +98,18 @@ export function MerchantPortalPage() {
 
       <div className="flex-1 overflow-y-auto bg-white pb-6">
         {tab === 'today' && (
-          <TodayView insight={insight} items={items} hours={hours} merchantId={merchantId} tick={tick} />
+          <TodayView
+            insight={insight} items={items} hours={hours}
+            merchantId={merchantId} tick={tick} dashboard={dashboard}
+          />
         )}
         {tab === 'menu' && <MenuView merchantId={merchantId} items={items} tick={tick} onChange={refresh} />}
-        {tab === 'rewards' && <RewardsView merchantName={merchantName} insight={insight} tick={tick} onChange={refresh} />}
+        {tab === 'rewards' && (
+          <RewardsView
+            merchantName={merchantName} insight={insight} tick={tick}
+            merchant={merchant} dashboard={dashboard} onChange={refresh}
+          />
+        )}
       </div>
     </div>
   );
@@ -102,12 +117,13 @@ export function MerchantPortalPage() {
 
 // ─── Today ───────────────────────────────────────────────────────────────────
 
-function TodayView({ insight, items, hours, merchantId, tick }: {
+function TodayView({ insight, items, hours, merchantId, tick, dashboard }: {
   insight: ReturnType<typeof getMerchantInsight>;
   items: ItemPerformance[];
   hours: { hour: string; quantity: number }[];
   merchantId: string;
   tick: number;
+  dashboard: MerchantDashboardData | null;
 }) {
   const slow = useMemo(() => getSlowMovers(merchantId), [merchantId, tick]);
   const best = items[0] ?? null;
@@ -148,7 +164,53 @@ function TodayView({ insight, items, hours, merchantId, tick }: {
         <Stat icon={Clock3} label="Busiest" value={busiest ? busiest.hour : insight.peakHour ?? '—'}
           note={insight.peakDay ?? 'No pattern yet'} />
         <Stat icon={Zap} label="Average sale" value={money(insight.averageSpend)} note="Per customer" />
+        {dashboard && (
+          <Stat icon={Sparkles} label="XP given out" value={dashboard.xpAwarded.toLocaleString()}
+            note="Earned by your customers" />
+        )}
+        {dashboard && (
+          <Stat icon={TicketCheck} label="Vouchers used" value={dashboard.voucherRedemptions.toLocaleString()}
+            note="Redeemed at your stall" />
+        )}
       </div>
+
+      {dashboard && dashboard.salesByDay.some(day => day.orders > 0) && (
+        <section>
+          <h2 className="mb-2 text-sm font-black text-foreground">Last seven days</h2>
+          <div className="flex items-end justify-between gap-1.5 rounded-2xl border-2 border-border bg-white p-3">
+            {dashboard.salesByDay.map(day => {
+              const peak = Math.max(...dashboard.salesByDay.map(entry => entry.revenue), 1);
+              return (
+                <div key={day.key} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                  <span className="text-[9px] font-bold text-muted-foreground">${day.revenue.toFixed(0)}</span>
+                  <div
+                    className="w-full rounded-t bg-primary"
+                    style={{ height: `${Math.max(6, (day.revenue / peak) * 60)}px` }}
+                    role="img"
+                    aria-label={`${day.label}: ${money(day.revenue)} from ${day.orders} orders`}
+                  />
+                  <span className="text-[9px] text-muted-foreground">{day.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {dashboard && dashboard.dayparts.some(part => part.orders > 0) && (
+        <section>
+          <h2 className="mb-2 text-sm font-black text-foreground">Breakfast, lunch or dinner stall?</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {dashboard.dayparts.map(part => (
+              <div key={part.label} className="rounded-2xl border-2 border-border bg-white p-3 text-center">
+                <p className="text-base font-black text-foreground">{part.orders}</p>
+                <p className="text-[10px] font-bold text-foreground">{part.label}</p>
+                <p className="text-[10px] text-muted-foreground">{money(part.revenue)}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {items.length > 0 && (
         <section>
@@ -203,6 +265,26 @@ function TodayView({ insight, items, hours, merchantId, tick }: {
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {dashboard && dashboard.transactionCount > 0 && (
+        <section className="rounded-2xl bg-primary/5 p-3">
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <Lightbulb size={14} className="text-primary" aria-hidden="true" />
+            <h2 className="text-xs font-black text-foreground">What to try next</h2>
+          </div>
+          <ul className="space-y-1.5">
+            {dashboard.recommendations.map(line => (
+              <li key={line} className="flex gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                <span aria-hidden="true" className="text-primary">·</span>{line}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Each suggestion comes from a figure on this screen, so you can check it against the
+            evidence rather than taking it on faith.
+          </p>
         </section>
       )}
 
@@ -377,10 +459,12 @@ function MenuRow({ item, sold, onToggle, onRemove }: {
 
 // ─── Rewards ─────────────────────────────────────────────────────────────────
 
-function RewardsView({ merchantName, insight, tick, onChange }: {
+function RewardsView({ merchantName, insight, tick, merchant, dashboard, onChange }: {
   merchantName: string;
   insight: ReturnType<typeof getMerchantInsight>;
   tick: number;
+  merchant: Merchant | null;
+  dashboard: MerchantDashboardData | null;
   onChange: () => void;
 }) {
   // A merchant may only promote their own rewards. Scoped here rather than in
@@ -557,6 +641,52 @@ function RewardsView({ merchantName, insight, tick, onChange }: {
         </section>
       )}
 
+      {merchant && (
+        <section>
+          <h2 className="mb-1 text-sm font-black text-foreground">Reward your regulars</h2>
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            Give extra XP on everything you sell. A higher multiplier costs you nothing directly —
+            it makes paying at your stall worth more to the customer.
+          </p>
+          <div className="rounded-2xl border-2 border-border bg-white p-4">
+            <div className="mb-2 grid grid-cols-3 gap-2">
+              {[1, 1.5, 2].map(option => (
+                <button
+                  key={option}
+                  onClick={() => { saveMerchant({ ...merchant, xpBonus: option }); onChange(); }}
+                  aria-pressed={merchant.xpBonus === option}
+                  className={`min-h-11 rounded-xl text-xs font-black ${merchant.xpBonus === option ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}
+                >
+                  {option}x
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Future $5 orders award{' '}
+              <b className="text-foreground">
+                {Math.max(1, Math.round(5 * merchant.xpRate * merchant.xpBonus))} XP
+              </b>.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {dashboard && dashboard.sales.length > 0 && (
+        <section>
+          <button
+            onClick={() => exportSales(merchantName, dashboard)}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border-2 border-border text-xs font-black text-foreground"
+          >
+            <Download size={14} aria-hidden="true" /> Export my sales report
+          </button>
+          <p className="mt-1.5 flex items-start gap-1 text-[10px] leading-relaxed text-muted-foreground">
+            <ShieldCheck size={11} className="mt-0.5 flex-shrink-0 text-primary" aria-hidden="true" />
+            Your report counts anonymous unique buyers — useful without exposing who your customers
+            are. It never contains a name, a phone number or a card.
+          </p>
+        </section>
+      )}
+
       <section className="rounded-2xl border-2 border-border p-3">
         <div className="mb-1 flex items-center gap-1.5">
           <BarChart3 size={14} className="text-primary" aria-hidden="true" />
@@ -576,6 +706,43 @@ function RewardsView({ merchantName, insight, tick, onChange }: {
       </section>
     </div>
   );
+}
+
+/**
+ * Hand the merchant their own numbers as a spreadsheet. Built from the rows
+ * already on screen, and deliberately without any customer identity in it —
+ * a stallholder needs what sold and when, not who bought it.
+ */
+function exportSales(merchantName: string, dashboard: MerchantDashboardData): void {
+  const rows = [
+    ['Item', 'Units', 'Revenue (SGD)', 'Share of orders'],
+    ...dashboard.topProducts.map(product => [
+      product.name,
+      String(product.orders),
+      product.revenue.toFixed(2),
+      `${Math.round(product.share * 100)}%`,
+    ]),
+    [],
+    ['Day', 'Orders', 'Revenue (SGD)'],
+    ...dashboard.salesByDay.map(day => [day.label, String(day.orders), day.revenue.toFixed(2)]),
+    [],
+    ['Anonymous unique buyers', String(dashboard.uniqueCustomers)],
+    ['Repeat buyers', String(dashboard.repeatCustomers)],
+    ['XP awarded to customers', String(dashboard.xpAwarded)],
+  ];
+
+  const csv = rows
+    .map(row => row.map(cell => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell)).join(','))
+    .join('\n');
+
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${merchantName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-sales.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function Figure({ value, label }: { value: string; label: string }) {

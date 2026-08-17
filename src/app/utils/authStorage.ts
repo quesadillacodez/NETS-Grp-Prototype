@@ -1,4 +1,6 @@
 import { getAllUsers, switchUser, type User } from './userStorage';
+import { getServerSession, serverLogin, serverLogout } from './serverApi';
+import { synchronizeDatabaseWithServer } from './db';
 
 const SESSION_KEY = 'nets-session-user-id';
 
@@ -23,10 +25,6 @@ function normalizeLoginId(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, '');
 }
 
-function normalizePhone(value: string): string {
-  return value.replace(/\D/g, '');
-}
-
 export function findUserByLoginId(loginId: string): User | null {
   const normalizedLoginId = normalizeLoginId(loginId);
   return getAllUsers().find(u =>
@@ -36,23 +34,37 @@ export function findUserByLoginId(loginId: string): User | null {
 
 // Customer-facing sign-in uses a memorable login ID while the rest of the app
 // continues to use stable internal IDs for database relationships.
-export function loginWithCredentials(loginId: string, pin: string): User | null {
-  const user = findUserByLoginId(loginId);
-  if (!user || !user.password || pin !== user.password) return null;
+export async function loginWithCredentials(loginId: string, pin: string): Promise<User> {
+  const authenticatedUser = await serverLogin(loginId, pin);
+  const user = getAllUsers().find(candidate => candidate.id === authenticatedUser.id) ?? authenticatedUser;
   localStorage.setItem(SESSION_KEY, user.id);
   switchUser(user.id);
+  await synchronizeDatabaseWithServer();
   window.dispatchEvent(new CustomEvent('sessionChanged'));
   return user;
 }
 
-export function verifyRecoveryIdentity(loginId: string, phone: string): User | null {
-  const user = findUserByLoginId(loginId);
-  if (!user || normalizePhone(user.phone) !== normalizePhone(phone)) return null;
-  return user;
+export async function restoreServerSession(): Promise<User | null> {
+  try {
+    const session = await getServerSession();
+    if (!session.authenticated || !session.user) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    const user = getAllUsers().find(candidate => candidate.id === session.user!.id) ?? session.user;
+    localStorage.setItem(SESSION_KEY, user.id);
+    switchUser(user.id);
+    await synchronizeDatabaseWithServer();
+    return user;
+  } catch {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
 }
 
 export function logout(): void {
   localStorage.removeItem(SESSION_KEY);
+  void serverLogout().catch(() => {});
   window.dispatchEvent(new CustomEvent('sessionChanged'));
 }
 

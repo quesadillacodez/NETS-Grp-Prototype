@@ -5,6 +5,39 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## One merchant side, not two
+
+Two merchant implementations landed independently: a stall portal on this
+branch, and a merchant dashboard on `main`. Merging them meant choosing, not
+concatenating.
+
+**One record of a sale.** The `main` build wrote every sale twice — once to the
+transaction ledger, once to its own `merchant_sales` table. Two records of the
+same sale is one record too many; they drift, and then the stall's takings
+disagree with its own menu report. `merchant_sales` is gone. Everything now
+reads `item_sales`, the single line-level record of what was sold, which the
+per-dish view already used. The dashboard's own figures were kept and re-pointed
+at it, so nothing it showed was lost.
+
+**Both roles survive.** `main` added a `role` column; this branch added
+`merchant_id`. The merged schema keeps both, and back-fills either from the
+other, so a database seeded under either build reads correctly under the merged
+one.
+
+**Kept from `main`:** the seven-day revenue chart, the breakfast/lunch/dinner
+split, the recommendation panel, "XP given out" and "Vouchers used", the
+merchant-set XP multiplier (1x/1.5x/2x), and the CSV export — which counts
+anonymous unique buyers and carries no name, number or card.
+
+**Kept from this branch:** per-dish ranking with peak hours and week-on-week
+trend, the menu editor, item-level attribution at the pay screen, the
+return-rate panel, self-serve paid placement, and the three-role route guard.
+
+XP is derived from the sale rather than stored, so the merchant's "XP given out"
+and the customer's own balance cannot disagree.
+
+---
+
 ## A merchant side of the app — `11d1437`
 
 The insights built earlier were admin-only, and stopped at the merchant name.
@@ -12,7 +45,7 @@ A stallholder could not open them, and "$6.80 at Kopitiam" was never the thing
 they wanted to know.
 
 **Merchant accounts** — two demo stalls sign in with their own credentials and
-land in their own portal: **Kopitiam** (`kopitiam090909` / `555555`) and
+land in their own portal: **Kopitiam** (`kopitiammerchant` / `555555`) and
 **Bubble Tea Bar** (`bubbletea070707` / `666666`).
 - The route guard generalised from admin-or-customer to three roles, each with
   a home and a set of pages it may stay on. A merchant cannot reach the
@@ -54,6 +87,92 @@ report — every seeded sale is now both.
 Covered by 17 unit tests over the item analytics and 13 end-to-end tests over
 the portal, the menu, the isolation between stalls, and the loop from paying for
 a dish to seeing it on the stall's dashboard.
+
+---
+
+## Vercel authentication and durable sessions — `a644461`
+
+The production deployment previously contained only the Vite bundle. Direct
+visits such as `/login` returned Vercel's 404 page, `/api/session` did not exist,
+and the login screen translated that missing backend into **Secure sign-in is
+temporarily unavailable**.
+
+- A root `api/index.mjs` now exposes the existing secure Node request handler as
+  a Vercel Function. An API-specific rewrite keeps every `/api/*` endpoint on
+  that function, while the final SPA rewrite sends unmatched browser routes to
+  `index.html`.
+- Credential hashes, HttpOnly sessions, recovery challenges, audit records and
+  the synchronized SQLite snapshot now persist in the connected Redis store.
+  The adapter accepts the `KV_REST_API_URL` / `KV_REST_API_TOKEN` names generated
+  by the installed Vercel integration as well as current `UPSTASH_REDIS_*`
+  names.
+- The JSON store remains the local-development fallback. Vercel fails clearly
+  during initialization if Redis or `SESSION_SECRET` is missing instead of
+  appearing to deploy successfully with a backend that cannot retain state.
+- Concurrent requests inside one Fluid Compute instance are serialized around
+  the prototype's cohesive state document, avoiding shared-memory session
+  races. The built-in customer, administrator and merchant accounts seed a new
+  demo store unless a custom `NETS_SEED_USERS_JSON` is supplied.
+
+Verified with strict TypeScript checking, 90 unit tests, four server-security
+tests, nine focused browser journeys across customer, administrator and merchant
+roles, a production Vite build, and direct checks of the rewritten API and SPA
+paths. PIN recovery in production still requires an approved
+`OTP_WEBHOOK_URL`; ordinary sign-in does not.
+
+---
+
+## Merchant portal, voucher return loop, secure sessions and PWA — `e31122f`
+
+The XP Store now has a dedicated seller side instead of leaving every merchant
+decision inside the administrator portal. A separate **Kopitiam Merchant**
+account is linked only to its own merchant record and is routed to a private
+`/merchant` workspace; customers cannot enter it, and merchants cannot enter
+customer or administrator journeys.
+
+**What the merchant can act on**
+
+- A mobile merchant dashboard reports NETS revenue, order count, average ticket,
+  anonymous unique and repeat customers, XP awarded and vouchers used.
+- Product references from real customer payments become a ranked menu report,
+  making signals such as **Nasi Lemak is the best seller** visible without
+  exposing customer names, cards or individual spending histories.
+- Seven-day revenue bars and breakfast, lunch and dinner demand show when stock
+  and staffing matter most.
+- A rule-based action feed turns those figures into simple recommendations for
+  the top item, the quietest period and customer retention.
+- The merchant can set a 1x, 1.5x or 2x XP multiplier for future purchases and
+  immediately see the customer-facing earning effect.
+- A CSV export provides the merchant-facing report that was previously missing
+  while deliberately omitting payment credentials and customer identities.
+
+Merchant sales are stored in a new scoped `merchant_sales` table. Successful
+full and split-payment journeys write into it once per payment ID, so the seller
+view follows actual app usage. A clearly labelled sample week gives the demo
+account an understandable starting story and remains distinguishable from live
+payments.
+
+**Voucher expiry return loop** — active vouchers now create deduplicated Rewards
+notifications as they cross the seven-, three- and one-day thresholds. Opening
+the alert deep-links to the voucher wallet, turning the existing Notification
+Centre into a useful return-visit trigger instead of introducing another inbox.
+
+**Security and installability**
+
+- Authentication moved behind a Node server with hashed PINs, throttled login
+  and recovery attempts, expiring challenges, HttpOnly sessions, CSRF checks and
+  an authenticated revision-based SQLite synchronisation endpoint.
+- Customer, administrator and merchant landing routes are derived from explicit
+  roles while safe internal deep links still work after customer sign-in.
+- A web app manifest, install card, offline fallback, service worker and NETS
+  icons make the prototype installable as a PWA.
+- The completed `XP_Rewards_Store_Deck.pptx` and its ten rendered slide previews
+  are included as presentation deliverables; generated inspection traces are
+  ignored.
+
+The integration with the newer Home, rewards-placement, location and merchant
+insight work passes 90 unit tests and 13 focused Chrome tests covering login,
+role isolation, the merchant dashboard, server security and PWA metadata.
 
 ---
 
@@ -335,9 +454,11 @@ workflow running typecheck, tests and the production build.
 
 Deliberate, and worth stating plainly in a presentation:
 
-- **No backend.** PINs are stored unhashed in a browser-local SQLite database,
-  recovery codes are shown on screen rather than delivered by SMS, and each
-  browser holds its own isolated copy of the data.
+- **Prototype backend.** PIN hashes, sessions and synchronized app state now
+  live behind a Vercel Function and connected Redis store. The prototype keeps
+  its state in one Redis document and uses an in-instance login throttle; a
+  banking rollout needs transactional records, a distributed rate limiter and
+  managed identity controls.
 - **Admin access is client-side.** The management portal is guarded in the UI,
   not by server-side authorisation.
 - **Payments are simulated.** The NETS sandbox needs credentials the prototype

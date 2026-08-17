@@ -6,7 +6,11 @@ const IDB_STORE = 'sqlite';
 const IDB_KEY = 'database';
 
 let db: Database | null = null;
+let sqlModule: Awaited<ReturnType<typeof initSqlJs>> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudSyncInFlight = false;
+const CLOUD_REVISION_KEY = 'nets-cloud-database-revision';
 
 function openIndexedDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
   email                     TEXT,
   password                  TEXT,
   is_admin                  INTEGER DEFAULT 0,
+  role                      TEXT DEFAULT 'customer',
   merchant_id               TEXT,
   reminder_frequency        TEXT DEFAULT 'daily',
   auto_reminders_enabled    INTEGER DEFAULT 1,
@@ -112,6 +117,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   reminder_id      INTEGER,
   channel          TEXT,
   link             TEXT,
+  -- Set once the push banner for this notification has been dismissed with its
+  -- (x) button, so it never pops back up on another page or app reopen. Distinct
+  -- from read: dismissing the banner does not clear it from the Notification
+  -- Centre.
+  banner_dismissed INTEGER DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
@@ -232,6 +242,8 @@ CREATE TABLE IF NOT EXISTS merchants (
   xp_rate    REAL DEFAULT 10,
   xp_bonus   REAL DEFAULT 1
 );
+
+-- Privacy-safe, merchant-scoped sales facts. Customer names and payment
 
 CREATE TABLE IF NOT EXISTS activities (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -419,6 +431,7 @@ export async function initDatabase(): Promise<void> {
   if (db) return;
 
   const SQL = await initSqlJs({ locateFile: () => '/sql-wasm.wasm' });
+  sqlModule = SQL;
 
   const bytes = await loadBytes();
   db = bytes ? new SQL.Database(bytes) : new SQL.Database();
@@ -443,10 +456,16 @@ export async function initDatabase(): Promise<void> {
     if (!names.includes('is_admin')) {
       db.run('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
     }
+    if (!names.includes('role')) {
+      db.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'customer'");
+      db.run("UPDATE users SET role = 'admin' WHERE is_admin = 1");
+    }
     // A merchant account is a user tied to one merchant. Null for customers and
-    // for the management account, which is what makes the role unambiguous.
+    // for the management account, which is what makes the role unambiguous —
+    // `role` names it, `merchant_id` says which stall.
     if (!names.includes('merchant_id')) {
       db.run('ALTER TABLE users ADD COLUMN merchant_id TEXT');
+      db.run("UPDATE users SET role = 'merchant' WHERE COALESCE(merchant_id,'') != ''");
     }
   } catch (e) {
     console.warn('users.is_admin migration skipped:', e);
@@ -514,6 +533,7 @@ export async function initDatabase(): Promise<void> {
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
     if (!names.includes('channel')) db.run('ALTER TABLE notifications ADD COLUMN channel TEXT');
     if (!names.includes('link')) db.run('ALTER TABLE notifications ADD COLUMN link TEXT');
+    if (!names.includes('banner_dismissed')) db.run('ALTER TABLE notifications ADD COLUMN banner_dismissed INTEGER DEFAULT 0');
   } catch (e) {
     console.warn('notifications channel migration skipped:', e);
   }
@@ -597,6 +617,7 @@ function scheduleSave(): void {
     if (!db) return;
     saveBytes(db.export()).catch(err => console.error('DB save failed:', err));
     void syncDatabaseToDisk();
+    scheduleCloudSync();
   }, 150);
 }
 
@@ -608,6 +629,96 @@ export async function flushSave(): Promise<void> {
   if (!db) return;
   await saveBytes(db.export());
   void syncDatabaseToDisk();
+  await syncDatabaseToServer();
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function scheduleCloudSync(): void {
+  if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
+  if (!localStorage.getItem('nets-session-user-id')) return;
+  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => { void syncDatabaseToServer(); }, 800);
+}
+
+function scrubClientCredentials(): void {
+  if (!db) return;
+  db.run('UPDATE users SET password = NULL WHERE password IS NOT NULL');
+}
+
+async function importCloudDatabase(sqlite: string, revision: number): Promise<void> {
+  if (!sqlModule) throw new Error('SQL engine is not ready.');
+  const candidate = new sqlModule.Database(base64ToBytes(sqlite));
+  const check = candidate.exec('PRAGMA quick_check');
+  if (!check.length || String(check[0].values[0]?.[0]) !== 'ok') {
+    candidate.close();
+    throw new Error('The synchronized database failed its integrity check.');
+  }
+  candidate.run(SCHEMA);
+  const userColumns = candidate.exec('PRAGMA table_info(users)');
+  const userColumnNames = userColumns.length ? userColumns[0].values.map(value => String(value[1])) : [];
+  if (!userColumnNames.includes('role')) {
+    candidate.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'customer'");
+    candidate.run("UPDATE users SET role = 'admin' WHERE is_admin = 1");
+  }
+  if (!userColumnNames.includes('merchant_id')) candidate.run('ALTER TABLE users ADD COLUMN merchant_id TEXT');
+  candidate.run('UPDATE users SET password = NULL WHERE password IS NOT NULL');
+  db?.close();
+  db = candidate;
+  localStorage.setItem(CLOUD_REVISION_KEY, String(revision));
+  await saveBytes(db.export());
+  window.dispatchEvent(new CustomEvent('databaseReady'));
+}
+
+async function syncDatabaseToServer(): Promise<void> {
+  if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
+  if (!db || cloudSyncInFlight || !localStorage.getItem('nets-session-user-id')) return;
+  cloudSyncInFlight = true;
+  try {
+    scrubClientCredentials();
+    const revision = Number(localStorage.getItem(CLOUD_REVISION_KEY) || 0);
+    const response = await fetch('/api/sync/state', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-NETS-CSRF': '1' },
+      body: JSON.stringify({ revision, sqlite: bytesToBase64(db.export()) }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 409 && body.state?.sqlite) {
+      await importCloudDatabase(body.state.sqlite, Number(body.state.revision));
+      window.dispatchEvent(new CustomEvent('cloudSyncConflict'));
+      return;
+    }
+    if (response.ok) localStorage.setItem(CLOUD_REVISION_KEY, String(body.revision));
+  } catch (error) {
+    console.warn('Cloud database sync paused:', error);
+  } finally {
+    cloudSyncInFlight = false;
+  }
+}
+
+/** Hydrate from the newest server copy, or upload this device's first copy. */
+export async function synchronizeDatabaseWithServer(): Promise<void> {
+  if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
+  if (!db) return;
+  try {
+    const response = await fetch('/api/sync/state', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return;
+    const state = await response.json() as { revision: number; sqlite: string | null };
+    const localRevision = Number(localStorage.getItem(CLOUD_REVISION_KEY) || 0);
+    if (state.sqlite && state.revision > localRevision) {
+      await importCloudDatabase(state.sqlite, state.revision);
+      return;
+    }
+    if (!state.sqlite) await syncDatabaseToServer();
+  } catch (error) {
+    console.warn('Cloud database hydration unavailable:', error);
+  }
 }
 
 function requireDb(): Database {

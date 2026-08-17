@@ -44,6 +44,7 @@ const MerchantPortalPage = lazy(() => import('./pages/MerchantPortalPage').then(
 const DemoControlsPage = lazy(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
 
 import './utils/autoReminderScheduler';
+import './utils/voucherExpiryScheduler';
 
 const routes: { path: string; Page: ComponentType }[] = [
   { path: '/', Page: HomePage },

@@ -17,3 +17,14 @@ pnpm-lock.yaml
 /playwright-report
 /blob-report
 /playwright/.cache
+
+# Runtime server state (contains credential hashes and sessions)
+/server/data/
+/tmp/*.json
+
+# Dev-only readable mirrors of the browser database
+/database/snapshot.md
+/database/tables/*.csv
+
+# Generated presentation inspection traces (the deck and preview images remain tracked)
+*.inspect.ndjson

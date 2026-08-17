@@ -4,9 +4,10 @@ import {
   AlertTriangle, Check, ChevronDown, Eye, EyeOff, FileText, KeyRound, LogOut, ShieldCheck,
 } from 'lucide-react';
 import { DarkHeader } from '../components/DarkHeader';
-import { flushSave } from '../utils/db';
 import { logout } from '../utils/authStorage';
-import { getCurrentUser, isValidPin, updateUserPin, verifyUserPin } from '../utils/userStorage';
+import { getCurrentUser } from '../utils/userStorage';
+import { isAcceptablePin } from '../utils/loginSecurity';
+import { changeServerPin } from '../utils/serverApi';
 import { useAppEvents } from '../utils/useAppEvents';
 
 type PolicyKey = 'privacy' | 'terms' | 'security';
@@ -16,9 +17,9 @@ const POLICIES: { key: PolicyKey; title: string; body: string[] }[] = [
     key: 'privacy',
     title: 'Privacy policy',
     body: [
-      'This prototype stores all of your data locally in your own browser, using SQLite compiled to WebAssembly with the database persisted in IndexedDB. Nothing is transmitted to a NETS server, and no analytics or tracking scripts are loaded.',
-      'The data held includes your profile details, transactions, split bills, reminders, Hangout plans, reward redemptions and notification preferences. Clearing your browser storage, or using Clear All Data in Profile, deletes all of it permanently.',
-      'A production release would store this data server-side under the Personal Data Protection Act, with a documented retention period and an export-and-delete request process.',
+      'Your profile, transactions, split bills, reminders, Hangout plans, reward redemptions and notification preferences are synchronized through the application server so they can follow your account across devices.',
+      'A local encrypted-session copy is retained for app performance and offline display. Clearing this device removes the local copy; synchronized data remains available after secure sign-in.',
+      'This student build contains simulated financial data only. A regulated release would require formal retention, export and deletion processes under Singapore’s Personal Data Protection Act.',
     ],
   },
   {
@@ -35,8 +36,8 @@ const POLICIES: { key: PolicyKey; title: string; body: string[] }[] = [
     title: 'Security information',
     body: [
       'Sign-in uses a login ID and a 6-digit PIN. Repeated incorrect attempts temporarily lock the account, and PIN recovery verifies your registered mobile number before issuing a new PIN.',
-      'Known limitation: because this prototype has no backend, PINs are stored unhashed in the local database and every browser holds its own isolated copy of the data. Recovery codes are shown on screen rather than delivered by SMS.',
-      'A production deployment would require a secure backend with hashed credentials, server-side sessions, real one-time-password delivery, role-based authorisation for the management portal, and server-synchronised data across devices.',
+      'PINs are hashed with a unique salt on the server and are never returned to the browser. Sign-in uses an HttpOnly session cookie, server-side throttling and account lockout.',
+      'Recovery codes are short-lived, stored only as keyed hashes and delivered through the configured OTP provider. Local development can explicitly expose a test code; production cannot.',
     ],
   },
 ];
@@ -50,18 +51,15 @@ export function SecurityPrivacyPage() {
   const [showPins, setShowPins] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [openPolicy, setOpenPolicy] = useState<PolicyKey | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useAppEvents(['userSwitched'], () => setCurrentUser(getCurrentUser()));
 
   const digitsOnly = (value: string) => value.replace(/\D/g, '').slice(0, 6);
-  const canSubmit = currentPin.length === 6 && isValidPin(newPin) && confirmPin.length === 6;
+  const canSubmit = currentPin.length === 6 && isAcceptablePin(newPin) && confirmPin.length === 6;
 
   const changePin = async () => {
     if (!canSubmit) return;
-    if (!verifyUserPin(currentUser.id, currentPin)) {
-      setStatus({ type: 'error', text: 'Your current PIN is incorrect.' });
-      return;
-    }
     if (newPin !== confirmPin) {
       setStatus({ type: 'error', text: 'The new PIN and confirmation do not match.' });
       return;
@@ -71,12 +69,18 @@ export function SecurityPrivacyPage() {
       return;
     }
 
-    updateUserPin(currentUser.id, newPin);
-    await flushSave();
-    setCurrentPin('');
-    setNewPin('');
-    setConfirmPin('');
-    setStatus({ type: 'success', text: 'Your PIN has been changed. Use it the next time you sign in.' });
+    setIsUpdating(true);
+    try {
+      await changeServerPin(currentPin, newPin);
+      setCurrentPin('');
+      setNewPin('');
+      setConfirmPin('');
+      setStatus({ type: 'success', text: 'Your PIN has been changed. Other signed-in devices were disconnected.' });
+    } catch (caught) {
+      setStatus({ type: 'error', text: caught instanceof Error ? caught.message : 'Your PIN could not be changed.' });
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const signOut = () => {
@@ -170,10 +174,10 @@ export function SecurityPrivacyPage() {
 
           <button
             onClick={changePin}
-            disabled={!canSubmit}
+            disabled={!canSubmit || isUpdating}
             className="mt-2 w-full rounded-2xl bg-primary py-3.5 text-sm font-black text-white disabled:opacity-40"
           >
-            Update PIN
+            {isUpdating ? 'Updating securely…' : 'Update PIN'}
           </button>
 
           <button

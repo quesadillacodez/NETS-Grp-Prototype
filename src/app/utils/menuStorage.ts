@@ -4,7 +4,8 @@
 // for. This module is the difference between the two: merchants keep a menu, a
 // payment can name the item it was for, and the dashboard reads the result.
 
-import { lastInsertId, query, run } from './db';
+import { lastInsertId, query, queryOne, run } from './db';
+import { addTransactions } from './transactionStorage';
 
 export interface MenuItem {
   id: number;
@@ -271,4 +272,106 @@ export function clearAllMenusAndSales(): void {
   run('DELETE FROM item_sales');
   run('DELETE FROM merchant_items');
   notifyMenu();
+}
+
+// ─── Demo trade ──────────────────────────────────────────────────────────────
+
+/**
+ * Give the demo stalls a menu and a fortnight of trade, so a merchant signing
+ * in to a fresh database sees a working dashboard rather than an empty one.
+ *
+ * Every seeded sale is written as both an item line and a payment. Seeding one
+ * without the other would leave a stall's takings disagreeing with its own menu
+ * report — the split-truth problem this codebase avoids everywhere else.
+ */
+export function seedMerchantTradeIfEmpty(): void {
+  const existing = queryOne('SELECT COUNT(*) AS n FROM merchant_items');
+  if (existing && Number(existing.n) > 0) return;
+
+  const daysAgo = (days: number) => Date.now() - days * 24 * 60 * 60 * 1000;
+  const label = (days: number) =>
+    days === 0 ? 'Just now' : days === 1 ? 'Yesterday' : `${days} days ago`;
+
+  const STALLS: Record<string, {
+    merchantName: string;
+    items: { name: string; price: number; category: string; everyNDays: number; hours: number[] }[];
+  }> = {
+    kopi: {
+      merchantName: 'Kopitiam',
+      items: [
+        { name: 'Nasi Lemak',       price: 3.50, category: 'Mains',  everyNDays: 1, hours: [7, 8, 8] },
+        { name: 'Chicken Rice',     price: 4.50, category: 'Mains',  everyNDays: 2, hours: [12, 13] },
+        { name: 'Mee Goreng',       price: 4.00, category: 'Mains',  everyNDays: 3, hours: [12] },
+        { name: 'Kopi O',           price: 1.40, category: 'Drinks', everyNDays: 1, hours: [7, 15] },
+        { name: 'Teh Tarik',        price: 1.60, category: 'Drinks', everyNDays: 2, hours: [8] },
+        { name: 'Roti Prata (2pc)', price: 2.40, category: 'Mains',  everyNDays: 3, hours: [8] },
+        // Never sold, so the "not selling" panel has something true to say.
+        { name: 'Milo Dinosaur',    price: 3.20, category: 'Drinks', everyNDays: 0, hours: [] },
+      ],
+    },
+    bubble: {
+      merchantName: 'Bubble Tea Bar',
+      items: [
+        { name: 'Brown Sugar Milk Tea', price: 5.40, category: 'Drinks',   everyNDays: 1, hours: [15, 19] },
+        { name: 'Classic Milk Tea',     price: 4.20, category: 'Drinks',   everyNDays: 2, hours: [16] },
+        { name: 'Matcha Latte',         price: 5.80, category: 'Drinks',   everyNDays: 3, hours: [16] },
+        { name: 'Egg Waffle',           price: 4.80, category: 'Desserts', everyNDays: 4, hours: [20] },
+      ],
+    },
+  };
+
+  // Attributed to Sarah and Mike, so Alex's own curated demo history on the
+  // customer side stays exactly as the presentation script expects it.
+  const BUYERS = ['2', '3'];
+  let seq = 0;
+  const payments: Parameters<typeof addTransactions>[0] = [];
+
+  for (const [merchantId, stall] of Object.entries(STALLS)) {
+    for (const item of stall.items) {
+      run(
+        'INSERT INTO merchant_items (merchant_id, name, price, category, active, created_at) VALUES (?, ?, ?, ?, 1, ?)',
+        [merchantId, item.name, item.price, item.category, daysAgo(30)],
+      );
+      const itemId = lastInsertId();
+      if (item.everyNDays === 0) continue;
+
+      for (let day = 13; day >= 0; day--) {
+        if (day % item.everyNDays !== 0) continue;
+        // Slightly busier in the most recent week, which is what the
+        // week-on-week trend on each dish compares against.
+        const timesToday = day < 7 ? item.hours.length : Math.max(1, item.hours.length - 1);
+
+        for (let n = 0; n < timesToday; n++) {
+          const when = new Date(daysAgo(day));
+          when.setHours(item.hours[n % item.hours.length], (n * 17) % 60, 0, 0);
+          seq += 1;
+
+          const paymentId = `DEMO-ITEM-${seq}`;
+          const buyer = BUYERS[seq % BUYERS.length];
+
+          run(
+            `INSERT OR IGNORE INTO item_sales
+              (payment_id, merchant_id, item_id, name, unit_price, quantity, user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+            [paymentId, merchantId, itemId, item.name, item.price, buyer, when.getTime()],
+          );
+
+          payments.push({
+            userId: buyer,
+            name: stall.merchantName,
+            amount: -item.price,
+            date: label(day),
+            category: 'Food & Dining',
+            kind: 'purchase' as const,
+            paymentId,
+            createdAt: when.getTime(),
+          });
+        }
+      }
+    }
+  }
+
+  addTransactions(payments);
+  notifyMenu();
+  window.dispatchEvent(new CustomEvent('itemSalesUpdated'));
 }

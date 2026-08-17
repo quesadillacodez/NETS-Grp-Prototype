@@ -1,9 +1,10 @@
 
-  # NETS Lifestyle Banking Prototype
+  # NETS Pay Together — Lifestyle Banking Prototype
 
   A mobile banking prototype built around NETS: payments and bill splitting,
-  savings goals, an XP rewards store, and NETS Hangouts — all on a browser-local
-  SQLite database, with no backend. The original design bundle is available at
+  savings goals, an XP rewards store, NETS Hangouts, and merchant insights. App
+  data uses a browser-local SQLite cache synchronized through a secure server.
+  The original design bundle is available at
   https://www.figma.com/design/UPb1XE6jPq6Xrh8UccxeFr/Mobile-Banking-App-Prototype.
 
   **[CHANGELOG.md](CHANGELOG.md) records every change made to the prototype,
@@ -16,6 +17,10 @@
 
   Run `npm run dev` to start the development server.
 
+  The development command starts one Node process for both the Vite app and the
+  secure `/api` routes. Demo PINs are hashed into the ignored runtime store on
+  first start; the browser never receives credential hashes or session tokens.
+
   Before a submission or demo, run:
 
   - `npm run typecheck` for strict TypeScript validation.
@@ -25,11 +30,25 @@
   - `npm run test:e2e` for the Playwright end-to-end suite, which serves a
     production preview build rather than the dev server.
 
-  ## Data storage (browser SQLite database)
+  ## Secure server and synchronized data
 
-  This version stores each user's records in a real SQLite database that runs
-  in the browser (via sql.js / WebAssembly) and saves to IndexedDB, so data
-  survives page refreshes. It replaces the old localStorage approach.
+  Authentication, login throttling, account lockout, HttpOnly sessions, PIN
+  changes and recovery challenges are handled by `server/index.mjs`. Recovery
+  codes expire after five minutes and are stored only as keyed hashes. Local
+  development can return a clearly labelled test OTP; production requires an
+  `OTP_WEBHOOK_URL` and never exposes the code in the browser.
+
+  App records use SQLite in the browser for fast local interaction and are
+  synchronized through the authenticated `/api/sync/state` endpoint. A newer
+  server revision hydrates another device after sign-in. Vercel deployments
+  persist sessions, credential hashes and synchronized state in the connected
+  Redis integration; local development uses the ignored JSON data file.
+
+  ## Local SQLite cache
+
+  Each device keeps a working SQLite copy in IndexedDB via sql.js/WebAssembly,
+  so navigation and refreshes remain fast. Credential fields are always null in
+  this browser copy.
 
   - Each user keeps their own records: every table has a user_id (reminders
     use from_user_id / to_user_id), and every read filters by the logged-in
@@ -44,9 +63,9 @@
   To wipe the whole database, open DevTools console and run:
   `indexedDB.deleteDatabase('nets-db')` then refresh.
 
-  Note: the database lives in one browser on one device — different browsers
-  or devices each get their own copy (there's no server syncing them). That's
-  expected for a browser-only setup.
+  The synchronized server copy is authoritative across devices. If two devices
+  submit the same revision, the newer server state wins and the stale device is
+  rehydrated rather than silently overwriting it.
 
   ## Environment variables (NETS Sandbox)
 
@@ -54,6 +73,19 @@
   before running `npm run dev`. These used to be hardcoded in
   `src/app/utils/netsQr.ts`; they're now read from `import.meta.env` so the
   key isn't committed to source control. `.env` is git-ignored.
+
+  Server-only variables must never use the `VITE_` prefix. For production, set
+  `NODE_ENV=production`, a 32-byte-or-longer `SESSION_SECRET`, the Redis
+  variables and the OTP provider values documented in `server/README.md`.
+  Vercel automatically deploys the Vite bundle and `api/index.mjs` from
+  `main`; other hosts can build with `npm run build` and run `npm start` behind
+  HTTPS.
+
+  ## Installable app
+
+  `public/manifest.webmanifest`, the branded icons and `public/sw.js` make the
+  production build installable as a standalone PWA. The shell has an offline
+  fallback; secure sign-in and synchronization still require connectivity.
 
   ## Recent hardening changes
 
@@ -101,8 +133,10 @@ individual feature ownership clear:
 - **Merchant portal (`/merchant`):** stalls sign in with their own accounts and see only
   their own trade — best-selling dish, every item ranked with its peak hour and week-on-week
   trend, an hourly chart, what is not selling, whether their rewards brought customers back,
-  and self-serve paid placement. Demo logins: `kopitiam090909` / `555555` and
-  `bubbletea070707` / `666666`.
+  and self-serve paid placement. The stall-level view adds a seven-day revenue chart,
+  a breakfast/lunch/dinner split, an XP multiplier the merchant sets themselves, and a
+  CSV export that counts anonymous unique buyers rather than naming customers.
+  Demo logins: `kopitiammerchant` / `555555` and `bubbletea070707` / `666666`.
 - **Merchant insights and paid placements (`/admin` → Rewards):** per-merchant reporting
   derived from the ledger — sales, busiest hour, repeat customers, most-redeemed rewards,
   and how many customers came back and paid after redeeming. Merchants can also buy
@@ -122,7 +156,8 @@ individual feature ownership clear:
   There is no device location permission — swapping `getUserArea` for the browser
   Geolocation API is the only change a production build needs.
 - **Shared persistence:** hangout shortlists, plans, votes, reward redemptions, users,
-  payments, reminders, budgets and admin data all persist in the browser sql.js database.
+  payments, reminders, budgets and admin data use the local sql.js cache and authenticated
+  server synchronization so the same account can resume on another device.
 - **Ledger integrity:** purchases, income, top-ups, transfers, cashback and refunds are
   classified separately. This prevents repayments from earning XP or appearing as merchant
   spending, and prevents top-ups/cashback from being presented as salary income.

@@ -8,6 +8,7 @@ import { getUnreadCount } from '../utils/notificationStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { useNavigate } from 'react-router';
 import { logout } from '../utils/authStorage';
+import { InstallAppCard } from '../components/InstallAppCard';
 
 const MENU_ITEMS = [
   { icon: User,        label: 'Personal Information', description: 'Name, email and mobile number',        color: 'from-blue-500 to-blue-600',     path: '/profile/personal' },
@@ -47,6 +48,7 @@ export function ProfilePage() {
       </div>
 
       <div className="flex-1 px-6 py-6 overflow-y-auto pb-24">
+        <InstallAppCard />
         {/* NETS Wrapped — the fun, personal side of the app */}
         <button
           onClick={() => navigate('/wrapped')}

@@ -73,6 +73,9 @@ CREATE TABLE IF NOT EXISTS notifications (
   timestamp        TEXT NOT NULL,
   read             INTEGER DEFAULT 0,
   reminder_id      INTEGER,
+  channel          TEXT,
+  link             TEXT,
+  banner_dismissed INTEGER DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

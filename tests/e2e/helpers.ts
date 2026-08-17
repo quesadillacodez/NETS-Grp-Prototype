@@ -7,14 +7,18 @@ export interface TestUser {
   firstName: string;
 }
 
-export const USERS: Record<'alex' | 'sarah' | 'mike' | 'admin' | 'kopitiam' | 'bubbletea', TestUser> = {
+export const USERS: Record<
+  'alex' | 'sarah' | 'mike' | 'admin' | 'merchant' | 'kopitiam' | 'bubbletea', TestUser
+> = {
   alex:  { loginId: 'alexchen140896',  pin: '111111', name: 'Alex Chen',  firstName: 'Alex' },
   sarah: { loginId: 'sarahtan230394',  pin: '222222', name: 'Sarah Tan',  firstName: 'Sarah' },
   mike:  { loginId: 'mikewong081192',  pin: '333333', name: 'Mike Wong',  firstName: 'Mike' },
   admin: { loginId: 'admin010180',     pin: '888888', name: 'Admin',      firstName: 'Admin' },
-  // Merchant accounts: each signs in to its own stall's portal.
-  kopitiam:  { loginId: 'kopitiam090909',  pin: '555555', name: 'Kopitiam',       firstName: 'Kopitiam' },
-  bubbletea: { loginId: 'bubbletea070707', pin: '666666', name: 'Bubble Tea Bar', firstName: 'Bubble' },
+  // Merchant accounts: each signs in to its own stall's portal. `merchant` is
+  // kept as an alias for `kopitiam` so tests written against either name work.
+  kopitiam:  { loginId: 'kopitiammerchant', pin: '555555', name: 'Kopitiam',       firstName: 'Kopitiam' },
+  merchant:  { loginId: 'kopitiammerchant', pin: '555555', name: 'Kopitiam',       firstName: 'Kopitiam' },
+  bubbletea: { loginId: 'bubbletea070707',  pin: '666666', name: 'Bubble Tea Bar', firstName: 'Bubble' },
 };
 
 /**
@@ -31,9 +35,9 @@ export async function stubNetsSandbox(page: Page): Promise<void> {
 /**
  * Open the app at the sign-in screen.
  *
- * Note for anyone extending these tests: the app deliberately signs out on every
- * full page load, so `page.goto()` after signing in would drop the session. All
- * navigation after `signIn` must go through the UI.
+ * Each Playwright browser context starts without a session. The production app
+ * restores its HttpOnly session across reloads, so tests should sign out when
+ * they specifically need to verify the signed-out state.
  */
 export async function openApp(page: Page): Promise<void> {
   await stubNetsSandbox(page);

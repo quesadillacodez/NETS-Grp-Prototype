@@ -5,7 +5,7 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
-## Showing that the data is real
+## Showing that the data is real — `a7ac891`
 
 A prototype's hardest claim to make from the outside is that it is not a set of
 hard-coded screens. `/admin` → **Database** answers it by showing the database
@@ -38,7 +38,7 @@ equals the balance on Home.
 
 ---
 
-## One merchant side, not two
+## One merchant side, not two — `892dc5a`
 
 Two merchant implementations landed independently: a stall portal on this
 branch, and a merchant dashboard on `main`. Merging them meant choosing, not
@@ -68,6 +68,12 @@ return-rate panel, self-serve paid placement, and the three-role route guard.
 
 XP is derived from the sale rather than stored, so the merchant's "XP given out"
 and the customer's own balance cannot disagree.
+
+`main`'s merchant end-to-end spec was rewritten rather than deleted: it was
+asserting two features worth keeping, and now covers what the per-dish spec does
+not — the week and daypart views, the multiplier, and the contents of the export.
+The demo login for the kopitiam was also documented wrongly in two places; it is
+`kopitiammerchant`, not `kopitiam090909`.
 
 ---
 
@@ -492,8 +498,11 @@ Deliberate, and worth stating plainly in a presentation:
   its state in one Redis document and uses an in-instance login throttle; a
   banking rollout needs transactional records, a distributed rate limiter and
   managed identity controls.
-- **Admin access is client-side.** The management portal is guarded in the UI,
-  not by server-side authorisation.
+- **Admin access is client-side.** The management portal, the merchant portal
+  and the database explorer are guarded in the UI by the role on the session,
+  not by server-side authorisation. The explorer is the one that matters most:
+  it can read every table, so in a real deployment that route would need the
+  server to refuse the data, not just the app to refuse the screen.
 - **Payments are simulated.** The NETS sandbox needs credentials the prototype
   cannot safely ship, so the QR flow falls back to a simulated authorisation
   with a mock reference.

@@ -43,7 +43,7 @@ const G = {
 };
 
 // Soft drifting blobs that give every slide subtle life in the background.
-function FloatingBlobs() {
+export function FloatingBlobs() {
   const blobs = [
     { size: 140, top: "8%", left: "-12%", delay: 0, dur: 9 },
     { size: 90, top: "62%", left: "72%", delay: 1.5, dur: 11 },
@@ -66,7 +66,7 @@ function FloatingBlobs() {
 }
 
 // Floating sparkle particles for celebratory slides.
-function SparkleField({ count = 10 }: { count?: number }) {
+export function SparkleField({ count = 10 }: { count?: number }) {
   const parts = Array.from({ length: count }, (_, i) => ({
     left: `${(i * 37) % 100}%`,
     top: `${(i * 53) % 100}%`,
@@ -91,7 +91,7 @@ function SparkleField({ count = 10 }: { count?: number }) {
 }
 
 // Animated count-up for the big hero numbers.
-function CountUp({ value, prefix = "", decimals = 0, className }: { value: number; prefix?: string; decimals?: number; className?: string }) {
+export function CountUp({ value, prefix = "", decimals = 0, className }: { value: number; prefix?: string; decimals?: number; className?: string }) {
   const [display, setDisplay] = useState(0);
   useEffect(() => {
     let raf = 0;

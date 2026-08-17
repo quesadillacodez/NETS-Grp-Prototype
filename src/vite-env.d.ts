@@ -10,3 +10,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Build id injected by Vite, used to version the service worker's cache. */
+declare const __BUILD_ID__: string;

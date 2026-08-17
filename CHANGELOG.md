@@ -5,6 +5,37 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## A deployment no longer breaks the open tab
+
+"Something went wrong — Failed to fetch dynamically imported module:
+.../AdminAccessPage-DBFQ14iU.js" on the live site, opening the admin portal.
+
+Pages are code-split, and every chunk filename carries a content hash. Deploying
+replaces those files, so a browser holding the previous build asks for a name
+the server no longer has and the import rejects. Two things made it stick:
+
+- **The app had no recovery.** A failed import went straight to the error
+  screen. It now reloads once, which fetches the current `index.html` and with it
+  the chunk names that exist now. The reload is stamped in `sessionStorage` and
+  only repeats after a minute, so a chunk that is genuinely broken still shows
+  the error rather than looping.
+- **The service worker never let go of the old shell.** Its cache name was a
+  fixed `v1`, so the `activate` handler — which deletes every cache except the
+  current one — never had anything to delete, and `/` and `/login` were
+  precached as HTML that names hashed chunks. The cache is now keyed to a build
+  id passed on the registration URL, so each release prunes the last, and no
+  HTML is precached: the navigation handler caches whatever the network last
+  returned, which is always the running build's shell.
+
+"Back to Home" on the error screen also now clears the caches and unregisters
+the service worker before reloading, but only for this class of error — it is an
+escape hatch from a stale shell, not something to do to every crash.
+
+Covered by an end-to-end test that fails a chunk request exactly once, the way a
+redeploy does, and asserts the app arrives at the page anyway.
+
+---
+
 ## Showing that the data is real — `a7ac891`
 
 A prototype's hardest claim to make from the outside is that it is not a set of

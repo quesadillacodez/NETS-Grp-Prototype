@@ -22,9 +22,30 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Unhandled UI error:', error, info.componentStack);
   }
 
-  private handleReset = (): void => {
+  /**
+   * Go home, and mean it.
+   *
+   * A page that failed to load its own code is usually a browser holding an app
+   * shell from a previous release: it asks for chunk filenames the server no
+   * longer has, and navigating within that shell fails the same way. So for that
+   * error the cached shell and its service worker are thrown away first, and the
+   * reload that follows starts from whatever is deployed now.
+   */
+  private handleReset = async (): Promise<void> => {
+    if (/dynamically imported module|Importing a module script failed/i.test(this.state.message)) {
+      try {
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(key => caches.delete(key)));
+        }
+        const registrations = await navigator.serviceWorker?.getRegistrations?.() ?? [];
+        await Promise.all(registrations.map(registration => registration.unregister()));
+      } catch {
+        // Nothing to clear, or the browser refused — reload anyway.
+      }
+    }
     this.setState({ hasError: false, message: '' });
-    window.location.href = '/';
+    window.location.replace('/');
   };
 
   render(): ReactNode {
@@ -40,7 +61,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="text-xs text-muted-foreground max-w-xs">{this.state.message}</p>
         </div>
         <button
-          onClick={this.handleReset}
+          onClick={() => { void this.handleReset(); }}
           className="flex items-center gap-1.5 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-bold"
         >
           <RotateCcw className="w-4 h-4" />

@@ -1,5 +1,16 @@
-const CACHE_NAME = 'nets-pay-together-v1';
-const APP_SHELL = ['/', '/login', '/offline.html', '/manifest.webmanifest', '/nets-icon.svg', '/nets-maskable.svg'];
+// One cache per build. The id comes from the `?v=` on the registration URL, so
+// a new release gets a new cache and `activate` deletes the old one. A single
+// fixed name would keep the first deployment's app shell forever, and that
+// shell points at chunk filenames later builds no longer have.
+const VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
+const CACHE_NAME = `nets-pay-together-${VERSION}`;
+
+// Only files whose contents are stable across releases are precached. `/` and
+// `/login` are deliberately absent: their HTML names hashed chunks, so a copy
+// of it kept from an earlier build is worse than no copy at all. The navigation
+// handler below caches whatever the network last returned, which is always the
+// shell for the build actually running.
+const APP_SHELL = ['/offline.html', '/manifest.webmanifest', '/nets-icon.svg', '/nets-maskable.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));

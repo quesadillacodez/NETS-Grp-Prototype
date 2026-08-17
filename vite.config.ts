@@ -127,4 +127,13 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  define: {
+    // A new id per build. The service worker is a static file, so it cannot
+    // carry a content hash of its own; this is registered as `/sw.js?v=<id>`
+    // so each release gets its own cache and the previous one is pruned on
+    // activate. Without it every deploy reuses one cache that is never
+    // cleared, and a stale app shell can outlive the chunks it points at.
+    __BUILD_ID__: JSON.stringify(process.env.BUILD_ID ?? String(Date.now())),
+  },
 })

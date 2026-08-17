@@ -64,8 +64,13 @@
 
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
     window.addEventListener('load', () => {
-      void navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
-        console.warn('Offline support could not be registered:', error);
-      });
+      // The build id makes each release its own service worker registration and
+      // its own cache, so the previous build's app shell is pruned rather than
+      // outliving the chunks it names.
+      void navigator.serviceWorker
+        .register(`/sw.js?v=${__BUILD_ID__}`, { scope: '/' })
+        .catch((error) => {
+          console.warn('Offline support could not be registered:', error);
+        });
     });
   }

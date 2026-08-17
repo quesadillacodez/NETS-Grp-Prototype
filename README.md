@@ -98,6 +98,11 @@ individual feature ownership clear:
   wallet cashback writes back to the same transaction ledger used by Home.
 - **Admin Portal (`/admin`):** management users can inspect live users and transactions,
   manage merchants, and maintain partner rewards that appear in the XP Rewards Store.
+- **Merchant portal (`/merchant`):** stalls sign in with their own accounts and see only
+  their own trade — best-selling dish, every item ranked with its peak hour and week-on-week
+  trend, an hourly chart, what is not selling, whether their rewards brought customers back,
+  and self-serve paid placement. Demo logins: `kopitiam090909` / `555555` and
+  `bubbletea070707` / `666666`.
 - **Merchant insights and paid placements (`/admin` → Rewards):** per-merchant reporting
   derived from the ledger — sales, busiest hour, repeat customers, most-redeemed rewards,
   and how many customers came back and paid after redeeming. Merchants can also buy

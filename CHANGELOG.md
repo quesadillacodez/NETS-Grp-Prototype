@@ -5,6 +5,58 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## A merchant side of the app — `11d1437`
+
+The insights built earlier were admin-only, and stopped at the merchant name.
+A stallholder could not open them, and "$6.80 at Kopitiam" was never the thing
+they wanted to know.
+
+**Merchant accounts** — two demo stalls sign in with their own credentials and
+land in their own portal: **Kopitiam** (`kopitiam090909` / `555555`) and
+**Bubble Tea Bar** (`bubbletea070707` / `666666`).
+- The route guard generalised from admin-or-customer to three roles, each with
+  a home and a set of pages it may stay on. A merchant cannot reach the
+  customer wallet; a customer cannot reach a portal.
+- Merchant accounts are excluded from the contact list, so a stall cannot be
+  invited to a Hangout or asked to split a bill, and from the customer counts
+  in the management portal.
+- Scoping is by session, never by page: every read takes the merchant id from
+  the signed-in user. A test asserts one stall cannot see another's dishes.
+
+**Menus and item-level sales** — merchants keep a menu (add, reprice, mark sold
+out, remove). Where a stall has one, the pay screen asks the customer what they
+bought and records it against the payment. The sale copies the item's name and
+price rather than joining to the menu, so renaming a dish never rewrites the
+history of what sold for how much; a unique index on (payment id, item id)
+makes it idempotent, matching the transaction ledger's own guard.
+
+**The dashboard** opens on the best seller by name — *"Nasi Lemak, 35 sold,
+$122.50, 42% of everything you sell, sells most around 8am"* — then:
+- every dish ranked, with its own peak hour and a week-on-week trend;
+- an hourly trading chart;
+- a panel naming what is on the menu but has never sold.
+
+A dish first sold this week shows **no** trend rather than a fabricated rise off
+a base of nothing.
+
+**The rewards tab** answers the merchant's real question: of the customers who
+redeemed one of your rewards, how many came back and paid you, and how many had
+never bought from you before. Merchants can also buy their own Featured or
+Spotlight placement — restricted to their own rewards — and see impressions,
+redemptions and what they paid.
+
+Two bugs found on the way. The scan screen had no way to choose a stall, and
+pressing Scan discarded a hand-picked merchant to randomise, so a chosen dish
+could never be paid for. And the seeded demo trade wrote item sales with no
+matching payments, leaving a stall's takings disagreeing with its own menu
+report — every seeded sale is now both.
+
+Covered by 17 unit tests over the item analytics and 13 end-to-end tests over
+the portal, the menu, the isolation between stalls, and the loop from paying for
+a dish to seeing it on the stall's dashboard.
+
+---
+
 ## Merchant insights and paid placements — `2fb7e08`
 
 The rewards store had a catalogue and no other side to it. Merchants got nothing

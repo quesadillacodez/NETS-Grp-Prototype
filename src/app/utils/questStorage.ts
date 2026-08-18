@@ -1,4 +1,5 @@
 import { query, run } from './db';
+import { classifyTransaction } from './transactionModel';
 
 /**
  * Daily missions.
@@ -164,12 +165,11 @@ export function getLoginSignals(userId: string): QuestSignal[] {
  */
 export function getTransactionSignals(userId: string): QuestSignal[] {
   const rows = query(
-    `SELECT name, amount, created_at, kind, status, payment_id
+    `SELECT name, amount, category, created_at, kind, status, payment_id
        FROM transactions
-      WHERE user_id = ? AND amount < 0
-        AND (kind = 'purchase' OR kind IS NULL)`,
+      WHERE user_id = ? AND amount < 0`,
     [userId],
-  );
+  ).filter(row => classifyTransaction(row) === 'purchase');
   const signals: QuestSignal[] = [];
   for (const row of rows) {
     const at = Number(row.created_at ?? 0);

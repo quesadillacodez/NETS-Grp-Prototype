@@ -1,6 +1,6 @@
-import { query } from './db';
 import { calculateTransactionXP } from './rewardStorage';
 import { effectiveBonus, getAllMerchants, getMerchantByName, type Merchant } from './merchantStorage';
+import { getPurchases } from './merchantInsights';
 
 /**
  * Merchant-side XP reporting.
@@ -40,17 +40,13 @@ interface PaymentRow {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * Purchases only, read through the same helper the merchant portal uses, so
+ * "XP issued" and "sales" can never be counted off different row sets.
+ */
 function loadPayments(): PaymentRow[] {
-  return query(
-    `SELECT name, amount, created_at
-       FROM transactions
-      WHERE amount < 0 AND (kind = 'purchase' OR kind IS NULL)`,
-  )
-    .map(row => ({
-      name: String(row.name),
-      amount: Math.abs(Number(row.amount)),
-      at: Number(row.created_at ?? 0),
-    }))
+  return getPurchases()
+    .map(row => ({ name: row.name, amount: row.amount, at: row.createdAt }))
     .filter(row => row.at > 0);
 }
 

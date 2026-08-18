@@ -88,7 +88,6 @@ test.describe('Selling a placement', () => {
 
   test('a paid slot buys position only — the price and the lock are untouched', async ({ page }) => {
     await openRewardsAdmin(page);
-    // The $10 cashback costs 1000 XP, far more than a new customer holds.
     await promote(page, /15% Off Stationery/, 'Featured');
 
     await signOutOfAdmin(page);
@@ -98,9 +97,15 @@ test.describe('Selling a placement', () => {
 
     const promoted = page.locator('.grid > button').filter({ hasText: '15% Off Stationery' }).first();
     await expect(promoted).toContainText('600 XP');
-    // Alex starts with 500 XP, so a sponsored reward they cannot afford still
-    // reads as locked rather than being made to look redeemable.
-    await expect(promoted).toContainText('View');
+
+    // The rule under test is that a paid slot never unlocks a reward the
+    // customer cannot afford. Read the balance rather than assuming a starting
+    // figure: daily missions mean what Alex holds depends on the day's
+    // activity, and a hardcoded number silently stops testing the lock the
+    // moment the earning rules change.
+    const balanceText = await page.locator('main').getByText(/^[\d,]+ XP$/).first().innerText();
+    const balance = Number(balanceText.replace(/[^\d]/g, ''));
+    await expect(promoted).toContainText(balance >= 600 ? 'Redeem' : 'View');
   });
 
   test('the store refuses to oversell its paid slots', async ({ page }) => {

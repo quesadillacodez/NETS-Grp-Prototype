@@ -30,6 +30,13 @@ export interface XPLedgerInput {
   bonus?: string;
   /** For refunds: the id of the earn entry being reversed. */
   reversesId?: string;
+  /**
+   * Grants that never lapse. The welcome bonus is pinned to a sentinel
+   * timestamp rather than a real date, so an expiry derived from it would be
+   * meaningless - and a starter bonus that vanishes before the user has spent
+   * it is not a starter bonus.
+   */
+  neverExpires?: boolean;
 }
 
 export interface XPLot {
@@ -141,7 +148,7 @@ export function buildLedger(entries: XPLedgerInput[], asOf: number = Date.now())
         id: entry.id,
         title: entry.title,
         earnedAt: entry.createdAt,
-        expiresAt: expiryFor(entry.createdAt),
+        expiresAt: entry.neverExpires ? Infinity : expiryFor(entry.createdAt),
         amount: entry.xp,
         spent: 0,
         refunded: 0,

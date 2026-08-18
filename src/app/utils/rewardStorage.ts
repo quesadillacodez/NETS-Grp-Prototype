@@ -111,6 +111,8 @@ export interface XPHistoryEntry {
   type: 'earn' | 'spend' | 'refund';
   createdAt: number;
   bonus?: string;
+  /** Starter grants that never lapse. See XPLedgerInput.neverExpires. */
+  neverExpires?: boolean;
 }
 
 export interface Tier {
@@ -401,7 +403,10 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     subtitle: 'Starter bonus',
     xp: WELCOME_XP,
     type: 'earn',
+    // Sentinel timestamp so it always sorts last; it is never expired, see
+    // `neverExpires` on the ledger input.
     createdAt: 1,
+    neverExpires: true,
   };
   const quests = getQuestEntries(getQuestSignals(userId));
   const withTiers = applyTierMultipliers([welcome, ...earned, ...quests]);

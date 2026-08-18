@@ -388,3 +388,35 @@ describe('merchant campaign windows', () => {
     expect(isCampaignActive(merchant({ xpBonus: 1 }))).toBe(false);
   });
 });
+
+describe('non-expiring grants', () => {
+  it('never expires the welcome bonus, whose timestamp is a sentinel', () => {
+    // Pinned to createdAt 1, so a date-derived expiry would kill it in 1970 and
+    // a brand new user would open the store with nothing to spend.
+    const ledger = buildLedger([
+      { id: 'welcome', title: 'Welcome', subtitle: '', xp: 500, type: 'earn', createdAt: 1, neverExpires: true },
+    ], new Date('2030-01-01T00:00:00').getTime());
+    expect(ledger.balance).toBe(500);
+    expect(ledger.totalExpired).toBe(0);
+  });
+
+  it('does not count a non-expiring grant as expiring soon', () => {
+    const ledger = buildLedger([
+      { id: 'welcome', title: 'Welcome', subtitle: '', xp: 500, type: 'earn', createdAt: 1, neverExpires: true },
+    ]);
+    expect(ledger.expiringSoon).toBe(0);
+    expect(ledger.expiringSoonAt).toBeNull();
+  });
+
+  it('still spends the oldest expiring XP before a permanent grant', () => {
+    const aug = new Date('2026-08-10T10:00:00').getTime();
+    const ledger = buildLedger([
+      { id: 'welcome', title: 'Welcome', subtitle: '', xp: 500, type: 'earn', createdAt: 1, neverExpires: true },
+      { id: 'txn-1', title: 'Kopitiam', subtitle: '', xp: 100, type: 'earn', createdAt: aug },
+      { id: 'r1', title: 'Voucher', subtitle: '', xp: 200, type: 'spend', createdAt: aug + 1000 },
+    ], aug + 2000);
+    // FIFO is by earn time, and the welcome bonus is the oldest lot.
+    expect(ledger.lots.find(l => l.id === 'welcome')!.spent).toBe(200);
+    expect(ledger.balance).toBe(400);
+  });
+});

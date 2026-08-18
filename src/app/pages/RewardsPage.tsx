@@ -582,17 +582,20 @@ function LedgerView({ userId }: { userId: string }) {
       ) : (
         <div className="space-y-2">
           {live.map(lot => {
-            const days = Math.ceil((lot.expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
+            const permanent = !Number.isFinite(lot.expiresAt);
+            const days = permanent ? Infinity : Math.ceil((lot.expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
+            const soon = !permanent && days <= 14;
             return (
               <div key={lot.id} className="flex items-center gap-3 rounded-2xl border border-border bg-white p-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-black">{lot.title}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    Expires {new Date(lot.expiresAt).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}
-                    {days <= 14 ? ` - ${days} day${days === 1 ? '' : 's'} left` : ''}
+                    {permanent
+                      ? 'Never expires'
+                      : `Expires ${new Date(lot.expiresAt).toLocaleDateString('en-SG', { day: 'numeric', month: 'short' })}${soon ? ` - ${days} day${days === 1 ? '' : 's'} left` : ''}`}
                   </p>
                 </div>
-                <p className={`shrink-0 text-sm font-black ${days <= 14 ? 'text-[#b7791f]' : 'text-foreground'}`}>
+                <p className={`shrink-0 text-sm font-black ${soon ? 'text-[#b7791f]' : 'text-foreground'}`}>
                   {lot.remaining.toLocaleString()}
                 </p>
               </div>

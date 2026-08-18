@@ -2,7 +2,7 @@
   import App from "./app/App";
   import "./styles/index.css";
   import { initDatabase } from "./app/utils/db";
-  import { seedTestReminders, seedTransactions } from "./app/utils/seedTestData";
+  import { seedTestReminders, seedTransactions, seedHistoricalTransactions } from "./app/utils/seedTestData";
   import { seedDealsIfEmpty, reconcileDealRedemptionCounts } from "./app/utils/dealStorage";
 
   initDatabase()
@@ -10,6 +10,7 @@
       seedTestReminders();
       seedDealsIfEmpty();
       seedTransactions();
+      seedHistoricalTransactions();
       reconcileDealRedemptionCounts();
 
       window.dispatchEvent(new CustomEvent("databaseReady"));

@@ -30,6 +30,7 @@ const WrappedPage = lazy(() => import('./pages/WrappedPage').then(m => ({ defaul
 const SpendingDashboardPage = lazy(() => import('./pages/SpendingDashboardPage').then(m => ({ default: m.SpendingDashboardPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const TopUpPage = lazy(() => import('./pages/TopUpPage').then(m => ({ default: m.TopUpPage })));
+const XPBreakdownPage = lazy(() => import('./pages/XPBreakdownPage').then(m => ({ default: m.XPBreakdownPage })));
 
 import './utils/autoReminderScheduler';
 
@@ -55,6 +56,7 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/hangouts', Page: HangoutsPage },
   { path: '/deals', Page: HangoutsPage },
   { path: '/rewards', Page: RewardsPage },
+  { path: '/xp-breakdown', Page: XPBreakdownPage },
   { path: '/wrapped', Page: WrappedPage },
   { path: '/dashboard', Page: SpendingDashboardPage },
   { path: '/admin', Page: AdminAccessPage },

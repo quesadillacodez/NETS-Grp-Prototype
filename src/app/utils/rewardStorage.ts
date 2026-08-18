@@ -38,6 +38,42 @@ export interface XPHistoryEntry {
   bonus?: string;
 }
 
+export interface Tier {
+  name: string;
+  level: number;
+  /** Lifetime XP at which this tier begins. */
+  start: number;
+  /** Lifetime XP at which the next tier begins, or null for the top tier. */
+  next: number | null;
+  color: string;
+  /** Short description of what reaching this tier represents. */
+  blurb: string;
+}
+
+/** Month bucket used by the XP breakdown screen. */
+export interface XPMonth {
+  /** Sortable `YYYY-MM` key. */
+  key: string;
+  /** Short label for the tab strip, e.g. "Aug". */
+  label: string;
+  /** Full label for headings, e.g. "August 2026". */
+  longLabel: string;
+}
+
+export interface MonthlyXPSummary {
+  key: string;
+  earned: number;
+  spent: number;
+  net: number;
+  /** Earn entries for the month, newest first. */
+  entries: XPHistoryEntry[];
+  /** XP earned from entries carrying a bonus multiplier. */
+  bonusXP: number;
+  transactionCount: number;
+  /** Merchant contributing the most XP this month, if any. */
+  topSource: { title: string; xp: number } | null;
+}
+
 export const WELCOME_XP = 500;
 
 export const REWARDS: Reward[] = [
@@ -221,15 +257,102 @@ export function markRewardUsed(redemptionId: number, userId: string): void {
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
 }
 
-export function getTier(lifetimeXP: number): {
-  name: string;
-  level: number;
-  start: number;
-  next: number | null;
-  color: string;
-} {
-  if (lifetimeXP >= 10000) return { name: 'Kampung Spirit', level: 4, start: 10000, next: null, color: '#f59e0b' };
-  if (lifetimeXP >= 4000) return { name: 'Heartland Insider', level: 3, start: 4000, next: 10000, color: '#8b5cf6' };
-  if (lifetimeXP >= 1000) return { name: 'Local Legend', level: 2, start: 1000, next: 4000, color: '#00a94f' };
-  return { name: 'Neighbourhood Explorer', level: 1, start: 0, next: 1000, color: '#2563eb' };
+/**
+ * The tier ladder, ordered from entry level upwards. `getTier` and the tier
+ * breakdown sheet both read from this list so the breakpoints can never drift
+ * apart between the two.
+ */
+export const TIERS: Tier[] = [
+  { name: 'Neighbourhood Explorer', level: 1, start: 0,     next: 1000,  color: '#2563eb', blurb: 'Just getting started with NETS payments around the neighbourhood.' },
+  { name: 'Local Legend',           level: 2, start: 1000,  next: 4000,  color: '#00a94f', blurb: 'A regular at your local stalls and kopitiams.' },
+  { name: 'Heartland Insider',      level: 3, start: 4000,  next: 10000, color: '#8b5cf6', blurb: 'You know where the good heartland deals are.' },
+  { name: 'Kampung Spirit',         level: 4, start: 10000, next: null,  color: '#f59e0b', blurb: 'The highest tier - a true supporter of local merchants.' },
+];
+
+export function getTier(lifetimeXP: number): Tier {
+  // Walk down from the top so the first tier whose threshold is met wins.
+  for (let index = TIERS.length - 1; index >= 0; index -= 1) {
+    if (lifetimeXP >= TIERS[index].start) return TIERS[index];
+  }
+  return TIERS[0];
+}
+
+/** Progress through the current tier as a 0-100 percentage. */
+export function getTierProgress(lifetimeXP: number, tier: Tier = getTier(lifetimeXP)): number {
+  if (tier.next === null) return 100;
+  const span = tier.next - tier.start;
+  if (span <= 0) return 100;
+  return Math.min(100, Math.max(0, ((lifetimeXP - tier.start) / span) * 100));
+}
+
+function monthKeyOf(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthFromKey(key: string): XPMonth {
+  const [year, month] = key.split('-').map(Number);
+  const date = new Date(year, month - 1, 1);
+  return {
+    key,
+    label: date.toLocaleDateString('en-SG', { month: 'short' }),
+    longLabel: date.toLocaleDateString('en-SG', { month: 'long', year: 'numeric' }),
+  };
+}
+
+/**
+ * Distinct months present in the history, newest first. The starter bonus is
+ * pinned to timestamp 1 so it is excluded - it would otherwise add a stray
+ * 1970 tab. Pass `alwaysInclude` to keep a month (typically the current one)
+ * in the list even when nothing was earned in it.
+ */
+export function listXPMonths(entries: XPHistoryEntry[], alwaysInclude?: string): XPMonth[] {
+  const keys = new Set<string>();
+  if (alwaysInclude) keys.add(alwaysInclude);
+  for (const entry of entries) {
+    if (entry.createdAt > 1) keys.add(monthKeyOf(entry.createdAt));
+  }
+  return [...keys].sort((a, b) => b.localeCompare(a)).map(monthFromKey);
+}
+
+export function summariseMonth(entries: XPHistoryEntry[], key: string): MonthlyXPSummary {
+  const inMonth = entries.filter(entry => entry.createdAt > 1 && monthKeyOf(entry.createdAt) === key);
+  const earnEntries = inMonth
+    .filter(entry => entry.type === 'earn')
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const earned = earnEntries.reduce((sum, entry) => sum + entry.xp, 0);
+  const spent = inMonth.filter(entry => entry.type === 'spend').reduce((sum, entry) => sum + entry.xp, 0);
+
+  // Group by merchant so repeat visits to one stall show as a single source.
+  const bySource = new Map<string, number>();
+  for (const entry of earnEntries) {
+    bySource.set(entry.title, (bySource.get(entry.title) ?? 0) + entry.xp);
+  }
+  const topSource = [...bySource.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([title, xp]) => ({ title, xp }))[0] ?? null;
+
+  return {
+    key,
+    earned,
+    spent,
+    net: earned - spent,
+    entries: earnEntries,
+    bonusXP: earnEntries.filter(entry => entry.bonus).reduce((sum, entry) => sum + entry.xp, 0),
+    transactionCount: earnEntries.filter(entry => entry.id.startsWith('txn-')).length,
+    topSource,
+  };
+}
+
+/** Current calendar month as a `YYYY-MM` key. */
+export function currentMonthKey(): string {
+  return monthKeyOf(Date.now());
+}
+
+export function getXPMonths(userId: string): XPMonth[] {
+  return listXPMonths(getXPHistory(userId));
+}
+
+export function getMonthlyXPSummary(userId: string, key: string): MonthlyXPSummary {
+  return summariseMonth(getXPHistory(userId), key);
 }

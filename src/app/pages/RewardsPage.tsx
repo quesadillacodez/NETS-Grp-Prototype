@@ -4,6 +4,7 @@ import {
   ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useNavigate } from 'react-router';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
@@ -11,10 +12,12 @@ import {
   getRewardsCatalog,
   getRewardRedemptions,
   getTier,
+  getTierProgress,
   getXPHistory,
   getXPStats,
   markRewardUsed,
   redeemReward,
+  TIERS,
   type Reward,
   type RewardCategory,
   type RewardRedemption,
@@ -97,22 +100,114 @@ function VoucherDetail({ redemption, onUse, onClose }: { redemption: RewardRedem
   );
 }
 
-function Overview({ userId, onTab }: { userId: string; onTab: (tab: RewardsTab) => void }) {
+function TierSheet({ lifetimeXP, onClose }: { lifetimeXP: number; onClose: () => void }) {
+  const tier = getTier(lifetimeXP);
+  const progress = getTierProgress(lifetimeXP, tier);
+  const remaining = tier.next === null ? 0 : tier.next - lifetimeXP;
+  return (
+    <OverlaySheet onClose={onClose}>
+      <div className="px-5 pb-8">
+        <div className="mb-5 flex items-start justify-between">
+          <div>
+            <p className="text-xs font-bold text-muted-foreground">Your tier</p>
+            <h2 className="text-xl font-black leading-tight">{tier.name}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Lifetime {lifetimeXP.toLocaleString()} XP earned</p>
+          </div>
+          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full bg-secondary"><X size={18} /></button>
+        </div>
+
+        <div className="rounded-2xl border border-border p-4">
+          <div className="flex items-end justify-between text-xs font-black">
+            <span style={{ color: tier.color }}>Level {tier.level}</span>
+            <span className="text-muted-foreground">{Math.round(progress)}%</span>
+          </div>
+          <div className="mt-2 h-3 overflow-hidden rounded-full bg-secondary">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.15 }}
+              className="h-full rounded-full"
+              style={{ backgroundColor: tier.color }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[10px] font-bold text-muted-foreground">
+            <span>{tier.start.toLocaleString()} XP</span>
+            <span>{tier.next === null ? 'Max' : `${tier.next.toLocaleString()} XP`}</span>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            {tier.next === null
+              ? 'You have unlocked every tier. Keep earning XP to spend in the Rewards Store.'
+              : `${remaining.toLocaleString()} XP to reach ${TIERS[tier.level].name}.`}
+          </p>
+        </div>
+
+        <h3 className="mb-2 mt-5 text-sm font-black">All tiers</h3>
+        <div className="space-y-2">
+          {TIERS.map(item => {
+            const unlocked = lifetimeXP >= item.start;
+            const isCurrent = item.level === tier.level;
+            return (
+              <div
+                key={item.level}
+                className={`rounded-2xl border p-3 ${isCurrent ? 'border-2 bg-secondary/40' : 'border-border bg-white'}`}
+                style={isCurrent ? { borderColor: item.color } : undefined}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white"
+                    style={{ backgroundColor: unlocked ? item.color : '#cbd5e1' }}
+                  >
+                    {unlocked ? <Check size={18} /> : <LockKeyhole size={16} />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-xs font-black">{item.name}</p>
+                      {isCurrent && <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[9px] font-black text-white">You</span>}
+                    </div>
+                    <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
+                      {item.next === null
+                        ? `${item.start.toLocaleString()} XP and above`
+                        : `${item.start.toLocaleString()} - ${(item.next - 1).toLocaleString()} XP`}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{item.blurb}</p>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
+          Tiers are based on lifetime XP earned, so redeeming rewards never costs you a tier.
+        </p>
+      </div>
+    </OverlaySheet>
+  );
+}
+
+function Overview({ userId, onTab, onOpenTiers, onOpenMonth }: {
+  userId: string;
+  onTab: (tab: RewardsTab) => void;
+  onOpenTiers: () => void;
+  onOpenMonth: () => void;
+}) {
   const stats = getXPStats(userId);
   const tier = getTier(stats.lifetimeXP);
-  const progress = tier.next ? Math.min(100, Math.max(0, ((stats.lifetimeXP - tier.start) / (tier.next - tier.start)) * 100)) : 100;
+  const progress = getTierProgress(stats.lifetimeXP, tier);
   const questProgress = Math.min(3, stats.transactionCount);
   return (
     <div className="space-y-3">
-      <motion.section initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="overflow-hidden rounded-3xl bg-gradient-to-br from-[#126c55] via-[#0e7a5f] to-[#1e2a4a] p-5 text-white shadow-lg">
+      <motion.button type="button" onClick={onOpenTiers} initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="w-full overflow-hidden rounded-3xl bg-gradient-to-br from-[#126c55] via-[#0e7a5f] to-[#1e2a4a] p-5 text-left text-white shadow-lg">
         <div className="flex items-start justify-between"><div><p className="text-xs font-bold text-white/65">Available balance</p><h1 className="mt-1 text-4xl font-black tracking-tight">{stats.currentXP.toLocaleString()} <span className="text-lg">XP</span></h1></div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><Award size={24} /></div></div>
         <div className="mt-5 flex items-center justify-between text-xs font-bold"><span>{tier.name}</span><span className="text-white/65">Lifetime {stats.lifetimeXP.toLocaleString()} XP</span></div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20"><motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }} className="h-full rounded-full bg-[#ffca28]" /></div>
-        <p className="mt-2 text-[10px] text-white/70">{tier.next ? `${(tier.next - stats.lifetimeXP).toLocaleString()} XP to the next tier` : 'Highest tier unlocked'}</p>
-      </motion.section>
+        <div className="mt-2 flex items-center justify-between">
+          <p className="text-[10px] text-white/70">{tier.next ? `${(tier.next - stats.lifetimeXP).toLocaleString()} XP to the next tier` : 'Highest tier unlocked'}</p>
+          <span className="flex items-center gap-0.5 text-[10px] font-black text-white/85">View tiers <ChevronRight size={12} /></span>
+        </div>
+      </motion.button>
 
       <section className="grid grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-border bg-white p-3"><div className="flex items-center gap-2 text-primary"><Zap size={16} /><span className="text-xs font-black">This month</span></div><p className="mt-2 text-2xl font-black">+{stats.earnedThisMonth.toLocaleString()}</p><p className="text-[10px] text-muted-foreground">XP from real NETS payments</p></div>
+        <button type="button" onClick={onOpenMonth} className="rounded-2xl border border-border bg-white p-3 text-left"><div className="flex items-center justify-between text-primary"><div className="flex items-center gap-2"><Zap size={16} /><span className="text-xs font-black">This month</span></div><ChevronRight size={14} className="text-muted-foreground" /></div><p className="mt-2 text-2xl font-black">+{stats.earnedThisMonth.toLocaleString()}</p><p className="text-[10px] text-muted-foreground">XP from real NETS payments</p></button>
         <div className="rounded-2xl border border-border bg-white p-3"><div className="flex items-center gap-2 text-[#f59e0b]"><Trophy size={16} /><span className="text-xs font-black">Weekly quest</span></div><p className="mt-2 text-2xl font-black">{questProgress}/3</p><p className="text-[10px] text-muted-foreground">Make 3 NETS payments</p></div>
       </section>
 
@@ -178,11 +273,13 @@ function HistoryView({ userId }: { userId: string }) {
 }
 
 export function RewardsPage() {
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [tab, setTab] = useState<RewardsTab>('overview');
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedVoucher, setSelectedVoucher] = useState<RewardRedemption | null>(null);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [showTiers, setShowTiers] = useState(false);
   const [, setVersion] = useState(0);
   const refresh = () => { setCurrentUser(getCurrentUser()); setVersion(version => version + 1); };
   useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus'], refresh);
@@ -215,13 +312,21 @@ export function RewardsPage() {
         </div>
       </header>
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-28">
-        {tab === 'overview' && <Overview userId={currentUser.id} onTab={setTab} />}
+        {tab === 'overview' && (
+          <Overview
+            userId={currentUser.id}
+            onTab={setTab}
+            onOpenTiers={() => setShowTiers(true)}
+            onOpenMonth={() => navigate('/xp-breakdown')}
+          />
+        )}
         {tab === 'store' && <StoreView currentXP={stats.currentXP} onSelect={setSelectedReward} />}
         {tab === 'wallet' && <WalletView userId={currentUser.id} onOpen={setSelectedVoucher} />}
         {tab === 'history' && <HistoryView userId={currentUser.id} />}
       </main>
       <BottomNav />
       <AccountSwitcher isOpen={showAccountSwitcher} onClose={() => setShowAccountSwitcher(false)} />
+      <AnimatePresence>{showTiers && <TierSheet lifetimeXP={stats.lifetimeXP} onClose={() => setShowTiers(false)} />}</AnimatePresence>
       <AnimatePresence>{selectedReward && <RewardDetail reward={selectedReward} currentXP={stats.currentXP} onClose={() => setSelectedReward(null)} onRedeem={confirmRedemption} />}</AnimatePresence>
       <AnimatePresence>{selectedVoucher && <VoucherDetail redemption={selectedVoucher} onClose={() => setSelectedVoucher(null)} onUse={useVoucher} />}</AnimatePresence>
     </div>

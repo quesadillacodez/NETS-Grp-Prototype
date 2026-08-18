@@ -131,6 +131,55 @@ export function seedTransactions(): void {
   run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', [HAS_SEEDED_TXNS_KEY, 'true']);
 }
 
+const HAS_SEEDED_HISTORY_KEY = 'has-seeded-history';
+
+// Backfills purchases across the previous few calendar months so the XP
+// breakdown screen has more than one month to switch between. Kept separate
+// from seedTransactions (and behind its own key) so databases seeded before
+// this existed still pick the history up, while the recent 7-day spread that
+// the home screen and dashboard rely on stays exactly as it was.
+export function seedHistoricalTransactions(): void {
+  const seeded = query('SELECT value FROM app_meta WHERE key = ?', [HAS_SEEDED_HISTORY_KEY]);
+  if (seeded.length > 0 && seeded[0].value === 'true') return;
+
+  const users = getAllUsers().filter(u => !u.isAdmin);
+  if (users.length === 0) return;
+
+  const merchants = [
+    { name: 'Kopitiam Food Court', cat: 'payment', amt: -6.8 },
+    { name: 'FairPrice Xtra', cat: 'payment', amt: -38.4 },
+    { name: 'Hawker Chan', cat: 'payment', amt: -5.5 },
+    { name: 'Grab Taxi', cat: 'payment', amt: -14.2 },
+    { name: 'Din Tai Fung', cat: 'payment', amt: -32.0 },
+    { name: 'BreadTalk Bugis', cat: 'payment', amt: -5.2 },
+    { name: 'Starbucks Orchard', cat: 'payment', amt: -7.4 },
+    { name: 'Guardian Pharmacy', cat: 'payment', amt: -18.6 },
+  ];
+
+  const now = new Date();
+  users.forEach((u, ui) => {
+    // Months 1-4 back; the current month is already covered by seedTransactions.
+    for (let monthsAgo = 1; monthsAgo <= 4; monthsAgo += 1) {
+      const month = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1);
+      const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+      const count = 4 + ((ui + monthsAgo) % 4); // 4-7 purchases per month
+      for (let i = 0; i < count; i += 1) {
+        const m = merchants[(ui * 2 + monthsAgo * 3 + i) % merchants.length];
+        const day = 1 + ((i * 5 + monthsAgo * 3) % daysInMonth);
+        const ts = new Date(month.getFullYear(), month.getMonth(), day, 12, 30).getTime();
+        run(
+          `INSERT INTO transactions
+            (user_id, name, amount, date, category, status, kind, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [u.id, m.name, m.amt, `${day}/${month.getMonth() + 1}`, m.cat, null, 'purchase', ts]
+        );
+      }
+    }
+  });
+
+  run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', [HAS_SEEDED_HISTORY_KEY, 'true']);
+}
+
 if (typeof window !== 'undefined') {
   (window as any).seedTestReminders = seedTestReminders;
 }

@@ -5,6 +5,33 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Bounding the XP economy, and warning before XP is lost
+
+Two consequences of the XP engine, addressed.
+
+**Mission XP had no ceiling.** Clearing every mission every day minted 310 XP
+against reward prices of 150-1000, so a committed user earned more from missions
+than from actually spending — roughly two $10 cashbacks a week for free. This
+was not theoretical: an end-to-end test that assumed a customer could not afford
+a 600 XP reward started failing because the balance had quietly grown past it.
+Mission values are rebalanced down (10/25/40/50/25, so a full day is 150 rather
+than 310), and mission earnings are now capped at 400 XP per Monday-anchored
+week. The allowance is spent chronologically, the day that hits the ceiling says
+so, and the Missions screen shows progress against the cap rather than letting
+it bite invisibly.
+
+**Expiry was quieter than earning.** XP lapsing was only visible to someone who
+happened to open the Rewards tab, so the rule that takes XP away was less
+apparent than the one that grants it. A new scheduler mirrors the voucher
+reminders — same 7/3/1/0-day tiers, same `app_meta` dedupe, same notification
+channel — and links straight to the ledger. Lots are grouped by the day they
+lapse rather than notified one by one, because a month of payments is dozens of
+lots expiring together and the total is what matters. Permanent grants are never
+warned about, and `?tab=ledger` was added to the Rewards deep-link allowlist,
+which otherwise would have dropped the notification on the overview tab.
+
+---
+
 ## XP that means something: tiers, a ledger and daily missions — `3cacd3c`, `4433098`
 
 The XP Store rewarded a lifetime total and nothing else. Four things changed.

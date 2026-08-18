@@ -77,6 +77,7 @@ const DatabaseExplorerPage = lazyPage(() => import('./pages/DatabaseExplorerPage
 
 import './utils/autoReminderScheduler';
 import './utils/voucherExpiryScheduler';
+import './utils/xpExpiryScheduler';
 
 const routes: { path: string; Page: ComponentType }[] = [
   { path: '/', Page: HomePage },

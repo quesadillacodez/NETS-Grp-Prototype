@@ -8,12 +8,14 @@ import {
 } from './hangoutStorage';
 import {
   applyTierMultipliers, getTier, getTierProgress, listXPMonths, summariseMonth,
-  tierMultiplier, TIERS, type XPHistoryEntry,
+  tierMultiplier, TIERS, buildQuestEntries, type XPHistoryEntry,
 } from './rewardStorage';
 import { buildLedger, expiryFor, type XPLedgerInput } from './xpLedger';
 import {
-  currentStreak, evaluateDay, rollingWeek, type QuestSignal,
+  currentStreak, evaluateDay, MISSIONS, rollingWeek, weekKey, WEEKLY_MISSION_XP_CAP,
+  type QuestSignal,
 } from './questStorage';
+import { daysUntil, groupExpiringXP } from './xpExpiryScheduler';
 import { effectiveBonus, isCampaignActive, type Merchant } from './merchantStorage';
 
 describe('splitAmountExactly', () => {
@@ -333,7 +335,12 @@ describe('daily missions', () => {
     const evaluated = evaluateDay(signals, day, now);
     const done = evaluated.missions.filter(m => m.complete).map(m => m.id);
     expect(done).toEqual(['daily-login', 'daily-payment', 'heartland-visit', 'three-payments']);
-    expect(evaluated.xpEarned).toBe(20 + 50 + 80 + 100);
+    // Derived from the mission definitions so a rebalance does not silently
+    // turn this into a test of stale numbers.
+    const expected = MISSIONS
+      .filter(mission => done.includes(mission.id))
+      .reduce((sum, mission) => sum + mission.xp, 0);
+    expect(evaluated.xpEarned).toBe(expected);
   });
 
   it('tracks partial progress on multi-step missions', () => {
@@ -418,5 +425,95 @@ describe('non-expiring grants', () => {
     // FIFO is by earn time, and the welcome bonus is the oldest lot.
     expect(ledger.lots.find(l => l.id === 'welcome')!.spent).toBe(200);
     expect(ledger.balance).toBe(400);
+  });
+});
+
+describe('weekly mission XP cap', () => {
+  // A full day of missions, every day, on a fresh signal set.
+  const fullDay = (day: number): QuestSignal[] => {
+    const at = (hour: number) => new Date(2026, 7, day, hour).getTime();
+    return [
+      { at: at(9), kind: 'login' },
+      { at: at(12), kind: 'heartland-payment' },
+      { at: at(13), kind: 'payment' },
+      { at: at(14), kind: 'payment' },
+      { at: at(15), kind: 'split' },
+    ];
+  };
+
+  it('a full day is worth every mission', () => {
+    // 10 + 25 + 40 + 50 + 25
+    expect(evaluateDay(fullDay(17), '2026-08-17').xpEarned).toBe(150);
+  });
+
+  it('stops paying out once the weekly allowance is spent', () => {
+    // Mon 17 Aug through Fri 21 Aug: 5 full days at 150 = 750 uncapped.
+    const signals = [17, 18, 19, 20, 21].flatMap(fullDay);
+    const total = buildQuestEntries(signals).reduce((sum, entry) => sum + entry.xp, 0);
+    expect(total).toBe(WEEKLY_MISSION_XP_CAP);
+  });
+
+  it('spends the allowance chronologically', () => {
+    const signals = [17, 18, 19, 20, 21].flatMap(fullDay);
+    const entries = buildQuestEntries(signals).sort((a, b) => a.createdAt - b.createdAt);
+    // 150 + 150 + 100 (clamped) = 400, then nothing further that week.
+    expect(entries.map(entry => entry.xp)).toEqual([150, 150, 100]);
+    expect(entries[2].subtitle).toContain('weekly cap reached');
+  });
+
+  it('resets the allowance in the following week', () => {
+    // Mon 17-Fri 21, then Mon 24 starts a fresh week.
+    const signals = [...[17, 18, 19, 20, 21].flatMap(fullDay), ...fullDay(24)];
+    const total = buildQuestEntries(signals).reduce((sum, entry) => sum + entry.xp, 0);
+    expect(total).toBe(WEEKLY_MISSION_XP_CAP + 150);
+  });
+
+  it('anchors weeks to Monday', () => {
+    // Sun 23 Aug belongs to the week starting Mon 17; Mon 24 starts the next.
+    expect(weekKey(new Date(2026, 7, 23, 12).getTime())).toBe('2026-08-17');
+    expect(weekKey(new Date(2026, 7, 24, 12).getTime())).toBe('2026-08-24');
+    expect(weekKey(new Date(2026, 7, 17, 0).getTime())).toBe('2026-08-17');
+  });
+});
+
+describe('XP expiry warnings', () => {
+  const NOW = new Date('2026-08-18T10:00:00').getTime();
+  const inDays = (days: number) => NOW + days * 24 * 60 * 60 * 1000;
+
+  it('groups everything lapsing on one day into a single warning', () => {
+    const groups = groupExpiringXP([
+      { remaining: 100, expiresAt: inDays(3) },
+      { remaining: 250, expiresAt: inDays(3) + 60_000 },
+      { remaining: 40, expiresAt: inDays(6) },
+    ], NOW);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].xp).toBe(350);
+    expect(groups[1].xp).toBe(40);
+  });
+
+  it('ignores XP that is already spent, already lapsed or still far off', () => {
+    const groups = groupExpiringXP([
+      { remaining: 0, expiresAt: inDays(2) },      // fully spent
+      { remaining: 500, expiresAt: inDays(-1) },   // already gone
+      { remaining: 800, expiresAt: inDays(30) },   // not yet a worry
+    ], NOW);
+    expect(groups).toEqual([]);
+  });
+
+  it('never warns about a grant that does not expire', () => {
+    expect(groupExpiringXP([{ remaining: 500, expiresAt: Infinity }], NOW)).toEqual([]);
+  });
+
+  it('rounds up so tomorrow never reads as today', () => {
+    expect(daysUntil(NOW + 90_000, NOW)).toBe(1);
+    expect(daysUntil(inDays(3), NOW)).toBe(3);
+  });
+
+  it('orders the soonest expiry first', () => {
+    const groups = groupExpiringXP([
+      { remaining: 10, expiresAt: inDays(6) },
+      { remaining: 20, expiresAt: inDays(1) },
+    ], NOW);
+    expect(groups.map(group => group.xp)).toEqual([20, 10]);
   });
 });

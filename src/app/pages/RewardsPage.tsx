@@ -973,7 +973,8 @@ export function RewardsPage() {
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [tab, setTab] = useState<RewardsTab>(() => {
     const requested = searchParams.get('tab');
-    return requested === 'store' || requested === 'wallet' || requested === 'history' ? requested : 'overview';
+    const deepLinkable: RewardsTab[] = ['store', 'wallet', 'ledger', 'history'];
+    return deepLinkable.find(candidate => candidate === requested) ?? 'overview';
   });
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedVoucher, setSelectedVoucher] = useState<RewardRedemption | null>(null);

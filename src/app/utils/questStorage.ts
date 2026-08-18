@@ -40,13 +40,35 @@ export interface QuestDay {
   isFuture: boolean;
 }
 
+/**
+ * Mission values are deliberately modest next to the 150-1000 XP reward prices.
+ * Clearing every mission every day would otherwise mint far more XP than
+ * spending does - a $6 kopi earns 60 XP, so a full day of missions must not be
+ * worth several times a real purchase.
+ */
 export const MISSIONS: Mission[] = [
-  { id: 'daily-login',     title: 'Daily check-in',    description: 'Open the NETS app',                    xp: 20,  target: 1, icon: '👋' },
-  { id: 'daily-payment',   title: 'Pay with NETS',     description: 'Make at least one NETS payment',       xp: 50,  target: 1, icon: '💳' },
-  { id: 'heartland-visit', title: 'Support heartland', description: 'Pay at a hawker, kopitiam or market',  xp: 80,  target: 1, icon: '🍜' },
-  { id: 'three-payments',  title: 'On a roll',         description: 'Make 3 NETS payments in a day',        xp: 100, target: 3, icon: '🔥' },
-  { id: 'split-a-bill',    title: 'Split the bill',    description: 'Share a bill with friends',            xp: 60,  target: 1, icon: '🤝' },
+  { id: 'daily-login',     title: 'Daily check-in',    description: 'Open the NETS app',                    xp: 10, target: 1, icon: '👋' },
+  { id: 'daily-payment',   title: 'Pay with NETS',     description: 'Make at least one NETS payment',       xp: 25, target: 1, icon: '💳' },
+  { id: 'heartland-visit', title: 'Support heartland', description: 'Pay at a hawker, kopitiam or market',  xp: 40, target: 1, icon: '🍜' },
+  { id: 'three-payments',  title: 'On a roll',         description: 'Make 3 NETS payments in a day',        xp: 50, target: 3, icon: '🔥' },
+  { id: 'split-a-bill',    title: 'Split the bill',    description: 'Share a bill with friends',            xp: 25, target: 1, icon: '🤝' },
 ];
+
+/**
+ * Ceiling on mission XP per week. Missions reward habit, not grinding: without
+ * a cap a committed user mints more XP from missions alone than from actually
+ * spending, and the reward catalogue loses its meaning.
+ */
+export const WEEKLY_MISSION_XP_CAP = 400;
+
+/** Monday-anchored `YYYY-MM-DD` key for the week containing `timestamp`. */
+export function weekKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  // getDay() is Sunday-based; shift so Monday starts the week.
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return dayKey(date.getTime());
+}
 
 /** One qualifying action, extracted from a real transaction row. */
 export interface QuestSignal {

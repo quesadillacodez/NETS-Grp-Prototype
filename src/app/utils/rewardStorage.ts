@@ -1,7 +1,9 @@
 import { lastInsertId, query, run } from './db';
 import { getDeals } from './dealStorage';
 import { DEFAULT_XP_RATE, effectiveBonus, getMerchantByName } from './merchantStorage';
-import { evaluateDay, getQuestSignals, dayKey, type QuestSignal } from './questStorage';
+import {
+  evaluateDay, getQuestSignals, dayKey, weekKey, WEEKLY_MISSION_XP_CAP, type QuestSignal,
+} from './questStorage';
 import { buildLedger, type XPLedger, type XPLedgerInput } from './xpLedger';
 
 export type RewardCategory = 'Cashback' | 'Vouchers' | 'Partner Deals';
@@ -311,23 +313,44 @@ export function applyTierMultipliers(entries: XPHistoryEntry[]): XPHistoryEntry[
 
 const MISSION_COUNT = 5;
 
-/** Quest XP for every day the user completed at least one mission. */
-function getQuestEntries(signals: QuestSignal[]): XPHistoryEntry[] {
-  const days = new Set(signals.map(signal => dayKey(signal.at)));
+/**
+ * Quest XP for every day the user completed at least one mission, clamped to
+ * the weekly allowance.
+ *
+ * Days are credited oldest first so the cap is spent chronologically: earning
+ * it early in the week is what stops later days paying out, rather than the
+ * order the rows happen to come back in.
+ */
+export function buildQuestEntries(signals: QuestSignal[]): XPHistoryEntry[] {
+  const days = [...new Set(signals.map(signal => dayKey(signal.at)))].sort();
   const entries: XPHistoryEntry[] = [];
+  const weeklyTotals = new Map<string, number>();
+
   for (const day of days) {
     const evaluated = evaluateDay(signals, day);
     const done = evaluated.missions.filter(mission => mission.complete);
     if (done.length === 0) continue;
+
+    const at = evaluated.date.getTime();
+    const week = weekKey(at);
+    const alreadyEarned = weeklyTotals.get(week) ?? 0;
+    const allowance = Math.max(0, WEEKLY_MISSION_XP_CAP - alreadyEarned);
+    const awarded = Math.min(evaluated.xpEarned, allowance);
+    if (awarded === 0) continue;
+    weeklyTotals.set(week, alreadyEarned + awarded);
+
+    const capped = awarded < evaluated.xpEarned;
     entries.push({
       id: `quest-${day}`,
       title: `Daily missions - ${done.length} complete`,
-      subtitle: done.map(mission => mission.title).join(', '),
-      xp: evaluated.xpEarned,
+      subtitle: capped
+        ? `${done.map(mission => mission.title).join(', ')} (weekly cap reached)`
+        : done.map(mission => mission.title).join(', '),
+      xp: awarded,
       type: 'earn',
       // Credit at the end of the day the missions were completed.
-      createdAt: evaluated.date.getTime() + 23 * 60 * 60 * 1000,
-      bonus: done.length === MISSION_COUNT ? 'All missions cleared' : undefined,
+      createdAt: at + 23 * 60 * 60 * 1000,
+      bonus: !capped && done.length === MISSION_COUNT ? 'All missions cleared' : undefined,
     });
   }
   return entries;
@@ -408,7 +431,7 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     createdAt: 1,
     neverExpires: true,
   };
-  const quests = getQuestEntries(getQuestSignals(userId));
+  const quests = buildQuestEntries(getQuestSignals(userId));
   const withTiers = applyTierMultipliers([welcome, ...earned, ...quests]);
   return [...withTiers, ...spent, ...refunds].sort((a, b) => b.createdAt - a.createdAt);
 }

@@ -10,6 +10,7 @@ import {
   evaluateDay,
   getQuestSignals,
   rollingWeek,
+  WEEKLY_MISSION_XP_CAP,
   type QuestDay,
 } from '../utils/questStorage';
 import { getCurrentUser } from '../utils/userStorage';
@@ -68,7 +69,11 @@ export function QuestsPage() {
   const detail = useMemo(() => evaluateDay(signals, selectedDay), [signals, selectedDay]);
   const streak = useMemo(() => currentStreak(signals), [signals]);
 
+  // The rolling week is what the calendar shows; the cap applies to the
+  // Monday-anchored week the allowance is actually tracked against.
   const weekXP = week.reduce((sum, day) => sum + day.xpEarned, 0);
+  const cappedWeekXP = Math.min(weekXP, WEEKLY_MISSION_XP_CAP);
+  const capReached = weekXP >= WEEKLY_MISSION_XP_CAP;
   const leadingBlanks = view === 'month' && days.length > 0 ? weekdayColumn(days[0].date) : 0;
 
   return (
@@ -88,8 +93,16 @@ export function QuestsPage() {
               <Target size={15} />
               <span className="text-[11px] font-black">This week</span>
             </div>
-            <p className="mt-1 text-3xl font-black text-white">+{weekXP.toLocaleString()}</p>
-            <p className="text-[10px] text-white/70">mission XP earned</p>
+            <p className="mt-1 text-3xl font-black text-white">+{cappedWeekXP.toLocaleString()}</p>
+            <p className="text-[10px] text-white/70">of {WEEKLY_MISSION_XP_CAP} mission XP</p>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/20">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, (cappedWeekXP / WEEKLY_MISSION_XP_CAP) * 100)}%` }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+                className="h-full rounded-full bg-[#ffca28]"
+              />
+            </div>
           </div>
         </div>
       </DarkHeader>
@@ -187,9 +200,20 @@ export function QuestsPage() {
           ))}
         </div>
 
+        {capReached && (
+          <div className="mt-4 flex items-center gap-2 rounded-2xl bg-[#fff4e5] p-3">
+            <Target size={15} className="shrink-0 text-[#b7791f]" />
+            <p className="text-[11px] text-[#7a4a00]">
+              You have hit this week's {WEEKLY_MISSION_XP_CAP} XP mission cap. Missions still track,
+              and the allowance resets on Monday.
+            </p>
+          </div>
+        )}
+
         <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
           Missions reset daily and are completed by real activity - paying with NETS, splitting a
-          bill or opening the app. Mission XP is credited at the end of each day.
+          bill or opening the app. Mission XP is credited at the end of each day, up to
+          {' '}{WEEKLY_MISSION_XP_CAP} XP a week so missions reward habit rather than grinding.
         </p>
       </main>
     </div>

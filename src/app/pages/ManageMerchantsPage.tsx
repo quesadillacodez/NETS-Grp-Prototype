@@ -94,15 +94,22 @@ export function ManageMerchantsPage() {
       reference: reference.trim() || undefined,
       xpRate: parsedRate,
       xpBonus: parsedBonus,
+      // Campaign scheduling and aliases are managed in the admin portal; keep
+      // whatever is already configured rather than clearing it here.
+      campaignStart: editing?.campaignStart ?? null,
+      campaignEnd: editing?.campaignEnd ?? null,
+      aliases: editing?.aliases ?? [],
     });
 
     toast.success(editing ? 'Merchant updated' : 'Merchant added');
     closeForm();
   };
 
+  // Soft delete: the row is kept so historical transactions keep pricing
+  // against the rate that was live when they happened.
   const handleRemove = (merchant: Merchant) => {
     deactivateMerchant(merchant.id);
-    toast.success(`${merchant.name} removed`);
+    toast.success(`${merchant.name} hidden from the scan list`);
   };
 
   const showForm = isNew || editing !== null;

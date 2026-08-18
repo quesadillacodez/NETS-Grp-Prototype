@@ -109,13 +109,24 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 
 CREATE TABLE IF NOT EXISTS merchants (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  amount     REAL NOT NULL,
-  reference  TEXT,
-  active     INTEGER DEFAULT 1,
-  xp_rate    REAL DEFAULT 10,
-  xp_bonus   REAL DEFAULT 1
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  amount         REAL NOT NULL,
+  reference      TEXT,
+  active         INTEGER DEFAULT 1,
+  xp_rate        REAL DEFAULT 10,
+  xp_bonus       REAL DEFAULT 1,
+  campaign_start INTEGER,
+  campaign_end   INTEGER,
+  aliases        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS daily_logins (
+  user_id TEXT NOT NULL,
+  day     TEXT NOT NULL,
+  at      INTEGER NOT NULL,
+  PRIMARY KEY (user_id, day),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS activities (
@@ -318,8 +329,32 @@ export async function initDatabase(): Promise<void> {
     if (!names.includes('xp_bonus')) {
       db.run('ALTER TABLE merchants ADD COLUMN xp_bonus REAL DEFAULT 1');
     }
+    if (!names.includes('campaign_start')) {
+      db.run('ALTER TABLE merchants ADD COLUMN campaign_start INTEGER');
+    }
+    if (!names.includes('campaign_end')) {
+      db.run('ALTER TABLE merchants ADD COLUMN campaign_end INTEGER');
+    }
+    if (!names.includes('aliases')) {
+      db.run('ALTER TABLE merchants ADD COLUMN aliases TEXT');
+      // Seed the aliases that the old substring matching used to cover, so XP
+      // on existing transactions does not change under the stricter matching.
+      db.run("UPDATE merchants SET aliases = 'Kopitiam Food Court' WHERE id = 'kopi'");
+      db.run("UPDATE merchants SET aliases = 'FairPrice Xtra' WHERE id = 'grocer'");
+    }
   } catch (e) {
     console.warn('merchants XP migration skipped:', e);
+  }
+
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS daily_logins (
+      user_id TEXT NOT NULL,
+      day     TEXT NOT NULL,
+      at      INTEGER NOT NULL,
+      PRIMARY KEY (user_id, day)
+    )`);
+  } catch (e) {
+    console.warn('daily_logins migration skipped:', e);
   }
 }
 

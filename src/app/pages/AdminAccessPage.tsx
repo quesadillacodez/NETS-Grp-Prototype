@@ -6,6 +6,7 @@ import { Toaster } from '../components/ui/sonner';
 import {
   X, Shield, Users, TrendingUp, TrendingDown, DollarSign, UsersRound,
   RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap,
+  CalendarDays, BarChart3,
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
 import { getAllTransactions, type Transaction } from '../utils/transactionStorage';
@@ -44,6 +45,26 @@ function toAdminTxn(tx: Transaction, userName: string) {
 function makeMerchantId(name: string): string {
   const base = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `${base || 'merchant'}-${Date.now().toString(36)}`;
+}
+
+/** Timestamp -> `YYYY-MM-DD` for a date input. */
+function toDateInput(timestamp: number | null): string {
+  if (timestamp === null) return '';
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * `YYYY-MM-DD` -> timestamp. The end of a campaign is inclusive, so it lands on
+ * the last millisecond of the chosen day rather than midnight at its start.
+ */
+function fromDateInput(value: string, edge: 'start' | 'end'): number | null {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return edge === 'start'
+    ? new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+    : new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
 }
 
 // ─── Hangout activity editor ─────────────────────────────────────────────────
@@ -302,6 +323,9 @@ export function AdminAccessPage() {
   const [mRef, setMRef] = useState('');
   const [mXpRate, setMXpRate] = useState(String(DEFAULT_XP_RATE));
   const [mXpBonus, setMXpBonus] = useState(String(DEFAULT_XP_BONUS));
+  const [mCampaignStart, setMCampaignStart] = useState('');
+  const [mCampaignEnd, setMCampaignEnd] = useState('');
+  const [mAliases, setMAliases] = useState('');
 
   const reload = () => {
     setCurrentUser(getCurrentUser());
@@ -372,11 +396,14 @@ export function AdminAccessPage() {
     setMerchantIsNew(true); setMerchantEditing(null);
     setMName(''); setMAmount(''); setMRef('');
     setMXpRate(String(DEFAULT_XP_RATE)); setMXpBonus(String(DEFAULT_XP_BONUS));
+    setMCampaignStart(''); setMCampaignEnd(''); setMAliases('');
   };
   const openEditMerchant = (m: Merchant) => {
     setMerchantIsNew(false); setMerchantEditing(m);
     setMName(m.name); setMAmount(m.amount.toFixed(2)); setMRef(m.reference ?? '');
     setMXpRate(String(m.xpRate)); setMXpBonus(String(m.xpBonus));
+    setMCampaignStart(toDateInput(m.campaignStart)); setMCampaignEnd(toDateInput(m.campaignEnd));
+    setMAliases(m.aliases.join(', '));
   };
   const closeMerchantForm = () => { setMerchantEditing(null); setMerchantIsNew(false); };
   const saveMerchantForm = () => {
@@ -388,19 +415,30 @@ export function AdminAccessPage() {
     if (isNaN(parsed) || parsed <= 0) { toast.error('Please enter a valid amount greater than 0'); return; }
     if (isNaN(xpRate) || xpRate < 0) { toast.error('XP per $1 must be 0 or more'); return; }
     if (isNaN(xpBonus) || xpBonus < 1) { toast.error('XP multiplier must be at least 1'); return; }
+    const campaignStart = fromDateInput(mCampaignStart, 'start');
+    const campaignEnd = fromDateInput(mCampaignEnd, 'end');
+    if (campaignStart !== null && campaignEnd !== null && campaignEnd < campaignStart) {
+      toast.error('Campaign end must be after the start date'); return;
+    }
+    if (xpBonus > 1 && campaignEnd !== null && campaignEnd < Date.now()) {
+      toast.error('Campaign end is in the past - the bonus would never pay out'); return;
+    }
     saveMerchant({
       id: merchantEditing ? merchantEditing.id : makeMerchantId(trimmed),
       name: trimmed, amount: parsed, reference: mRef.trim() || undefined,
-      xpRate, xpBonus,
+      xpRate, xpBonus, campaignStart, campaignEnd,
+      aliases: mAliases.split(',').map(a => a.trim()).filter(Boolean),
     });
     toast.success(merchantEditing ? 'Merchant updated' : 'Merchant added');
     closeMerchantForm();
     setMerchants(getMerchants());
   };
   const removeMerchant = (m: Merchant) => {
-    if (!confirm(`Remove "${m.name}"?\n\nIt will no longer be scannable on the pay screen.`)) return;
+    if (!confirm(
+      `Hide "${m.name}"?\n\nIt will no longer be scannable on the pay screen. Past payments keep the XP they earned, and the merchant can be restored later.`
+    )) return;
     deactivateMerchant(m.id);
-    toast.success(`${m.name} removed`);
+    toast.success(`${m.name} hidden from the scan list`);
     setMerchants(getMerchants());
   };
   const showMerchantForm = merchantIsNew || merchantEditing !== null;
@@ -637,10 +675,21 @@ export function AdminAccessPage() {
             </div>
 
             {!showMerchantForm && (
-              <button onClick={openNewMerchant}
-                className="w-full mb-4 p-4 rounded-2xl border-2 border-dashed border-primary/40 flex items-center justify-center gap-2 text-primary font-bold">
-                <Plus className="w-5 h-5" /> Add Merchant
-              </button>
+              <>
+                <button onClick={() => navigate('/merchant-analytics')}
+                  className="w-full mb-3 p-4 rounded-2xl bg-[#1e2a4a] flex items-center gap-3 text-left">
+                  <BarChart3 className="w-5 h-5 text-white shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-bold text-sm">XP Analytics</p>
+                    <p className="text-white/70 text-xs">XP issued, bonus cost and campaign uplift</p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-white/70 shrink-0" />
+                </button>
+                <button onClick={openNewMerchant}
+                  className="w-full mb-4 p-4 rounded-2xl border-2 border-dashed border-primary/40 flex items-center justify-center gap-2 text-primary font-bold">
+                  <Plus className="w-5 h-5" /> Add Merchant
+                </button>
+              </>
             )}
 
             {showMerchantForm && (
@@ -677,6 +726,43 @@ export function AdminAccessPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mb-4">
                   A $10 payment here earns {Math.max(0, Math.round(10 * (parseFloat(mXpRate) || 0) * (parseFloat(mXpBonus) || 0)))} XP.
+                </p>
+
+                {parseFloat(mXpBonus) > 1 && (
+                  <>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <CalendarDays className="w-4 h-4 text-primary" />
+                      <span className="text-xs font-bold text-foreground">Campaign window</span>
+                    </div>
+                    <div className="flex gap-2 mb-2">
+                      <div className="flex-1">
+                        <label className="text-xs text-muted-foreground mb-1 block">Starts</label>
+                        <input type="date" value={mCampaignStart} onChange={(e) => setMCampaignStart(e.target.value)}
+                          className="w-full px-3 py-3 rounded-xl bg-secondary text-foreground text-sm outline-none" />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-xs text-muted-foreground mb-1 block">Ends</label>
+                        <input type="date" value={mCampaignEnd} onChange={(e) => setMCampaignEnd(e.target.value)}
+                          className="w-full px-3 py-3 rounded-xl bg-secondary text-foreground text-sm outline-none" />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      {mCampaignStart || mCampaignEnd
+                        ? `The ${parseFloat(mXpBonus)}x bonus only applies to payments inside this window. Outside it, customers earn the base rate.`
+                        : 'Leave both blank to run the bonus indefinitely.'}
+                    </p>
+                  </>
+                )}
+
+                <label className="text-xs text-muted-foreground mb-2 block">
+                  Also known as (comma separated)
+                </label>
+                <input value={mAliases} onChange={(e) => setMAliases(e.target.value)}
+                  placeholder="e.g. Kopitiam Food Court, Kopitiam @ Bugis"
+                  className="w-full mb-1 px-4 py-3 rounded-xl bg-secondary text-foreground outline-none" />
+                <p className="text-xs text-muted-foreground mb-4">
+                  Payments are matched to this merchant by exact name, so list any other names its
+                  transactions appear under.
                 </p>
 
                 <button onClick={saveMerchantForm} className="w-full py-3 rounded-xl bg-primary text-white font-bold">

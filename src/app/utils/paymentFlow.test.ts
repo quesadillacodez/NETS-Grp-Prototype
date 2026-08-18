@@ -6,9 +6,14 @@ import {
   type Activity, type Hangout, type HangoutVote,
 } from './hangoutStorage';
 import {
-  getTier, getTierProgress, listXPMonths, summariseMonth, TIERS,
-  type XPHistoryEntry,
+  applyTierMultipliers, getTier, getTierProgress, listXPMonths, summariseMonth,
+  tierMultiplier, TIERS, type XPHistoryEntry,
 } from './rewardStorage';
+import { buildLedger, expiryFor, type XPLedgerInput } from './xpLedger';
+import {
+  currentStreak, evaluateDay, rollingWeek, type QuestSignal,
+} from './questStorage';
+import { effectiveBonus, isCampaignActive, type Merchant } from './merchantStorage';
 
 describe('splitAmountExactly', () => {
   it('assigns rounding cents without changing the bill total', () => {
@@ -180,5 +185,180 @@ describe('XP month grouping', () => {
     expect(empty.earned).toBe(0);
     expect(empty.entries).toEqual([]);
     expect(empty.topSource).toBeNull();
+  });
+});
+
+describe('XP ledger', () => {
+  const AUG = new Date('2026-08-10T10:00:00').getTime();
+  const SEP = new Date('2026-09-10T10:00:00').getTime();
+  const earn = (id: string, xp: number, at: number): XPLedgerInput =>
+    ({ id, title: id, subtitle: '', xp, type: 'earn', createdAt: at });
+
+  it('expires XP at the end of the month after it was earned', () => {
+    // Earned 10 Aug -> expires 30 Sep, so it is still live in mid-September.
+    expect(expiryFor(AUG)).toBe(new Date('2026-09-30T23:59:59.999').getTime());
+    expect(buildLedger([earn('a', 100, AUG)], SEP).balance).toBe(100);
+    expect(buildLedger([earn('a', 100, AUG)], new Date('2026-10-01T00:00:00').getTime()).balance).toBe(0);
+  });
+
+  it('records expiry in the audit trail instead of silently dropping XP', () => {
+    const ledger = buildLedger([earn('a', 100, AUG)], new Date('2026-11-01T00:00:00').getTime());
+    expect(ledger.totalExpired).toBe(100);
+    expect(ledger.events.some(e => e.type === 'expire' && e.xp === 100)).toBe(true);
+  });
+
+  it('spends the oldest XP first so nothing lapses unnecessarily', () => {
+    const ledger = buildLedger([
+      earn('old', 100, AUG),
+      earn('new', 100, SEP),
+      { id: 'r1', title: 'Voucher', subtitle: '', xp: 60, type: 'spend', createdAt: SEP + 1000 },
+    ], SEP + 2000);
+    const oldLot = ledger.lots.find(l => l.id === 'old')!;
+    const newLot = ledger.lots.find(l => l.id === 'new')!;
+    expect(oldLot.spent).toBe(60);
+    expect(newLot.spent).toBe(0);
+    expect(ledger.balance).toBe(140);
+  });
+
+  it('cannot spend XP that already expired', () => {
+    const ledger = buildLedger([
+      earn('old', 100, AUG),
+      { id: 'r1', title: 'Voucher', subtitle: '', xp: 100, type: 'spend', createdAt: new Date('2026-10-05T10:00:00').getTime() },
+    ], new Date('2026-10-06T10:00:00').getTime());
+    expect(ledger.totalExpired).toBe(100);
+    expect(ledger.balance).toBe(0);
+  });
+
+  it('claws back a refund from the reversed payment’s own lot', () => {
+    const ledger = buildLedger([
+      earn('txn-1', 100, SEP),
+      earn('txn-2', 50, SEP + 1000),
+      { id: 'refund-1', title: 'Refund', subtitle: '', xp: 100, type: 'refund', createdAt: SEP + 2000, reversesId: 'txn-1' },
+    ], SEP + 3000);
+    expect(ledger.lots.find(l => l.id === 'txn-1')!.refunded).toBe(100);
+    expect(ledger.lots.find(l => l.id === 'txn-2')!.refunded).toBe(0);
+    expect(ledger.balance).toBe(50);
+    expect(ledger.totalRefunded).toBe(100);
+  });
+
+  it('flags XP expiring within the warning window', () => {
+    const nearExpiry = new Date('2026-09-25T10:00:00').getTime();
+    const ledger = buildLedger([earn('a', 100, AUG)], nearExpiry);
+    expect(ledger.expiringSoon).toBe(100);
+    expect(ledger.expiringSoonAt).toBe(expiryFor(AUG));
+  });
+});
+
+describe('tier multipliers', () => {
+  it('scales the earn rate with the tier ladder', () => {
+    expect(tierMultiplier(1)).toBe(1);
+    expect(tierMultiplier(2)).toBe(1.1);
+    expect(tierMultiplier(3)).toBe(1.2);
+    expect(tierMultiplier(4)).toBe(1.3);
+  });
+
+  it('applies the tier held at the time of each transaction', () => {
+    const at = (day: number) => new Date(2026, 7, day).getTime();
+    const entries: XPHistoryEntry[] = [
+      // Starts at level 1 (1x), crosses 1000 lifetime and moves to 1.1x.
+      { id: 'a', title: 'a', subtitle: '', xp: 600, type: 'earn', createdAt: at(1) },
+      { id: 'b', title: 'b', subtitle: '', xp: 600, type: 'earn', createdAt: at(2) },
+      { id: 'c', title: 'c', subtitle: '', xp: 100, type: 'earn', createdAt: at(3) },
+    ];
+    const result = applyTierMultipliers(entries);
+    expect(result[0].xp).toBe(600);            // level 1, 1x
+    expect(result[1].xp).toBe(600);            // still level 1 at the time (600 lifetime)
+    expect(result[2].xp).toBe(110);            // now level 2 (1200 lifetime), 1.1x
+    expect(result[2].bonus).toContain('1.1x tier bonus');
+  });
+
+  it('leaves spends untouched', () => {
+    const entries: XPHistoryEntry[] = [
+      { id: 's', title: 's', subtitle: '', xp: 300, type: 'spend', createdAt: 5000 },
+    ];
+    expect(applyTierMultipliers(entries)[0].xp).toBe(300);
+  });
+});
+
+describe('daily missions', () => {
+  const day = '2026-08-18';
+  const at = (hour: number) => new Date(2026, 7, 18, hour).getTime();
+  const now = new Date(2026, 7, 18, 23).getTime();
+
+  it('resets per day instead of counting lifetime activity', () => {
+    // Three payments yesterday must not complete today's missions.
+    const yesterday: QuestSignal[] = [
+      { at: new Date(2026, 7, 17, 12).getTime(), kind: 'payment' },
+      { at: new Date(2026, 7, 17, 13).getTime(), kind: 'payment' },
+      { at: new Date(2026, 7, 17, 14).getTime(), kind: 'payment' },
+    ];
+    const today = evaluateDay(yesterday, day, now);
+    expect(today.completedCount).toBe(0);
+    expect(today.xpEarned).toBe(0);
+  });
+
+  it('completes missions from real signals on the day', () => {
+    const signals: QuestSignal[] = [
+      { at: at(9), kind: 'login' },
+      { at: at(12), kind: 'heartland-payment' },
+      { at: at(13), kind: 'payment' },
+      { at: at(14), kind: 'payment' },
+    ];
+    const evaluated = evaluateDay(signals, day, now);
+    const done = evaluated.missions.filter(m => m.complete).map(m => m.id);
+    expect(done).toEqual(['daily-login', 'daily-payment', 'heartland-visit', 'three-payments']);
+    expect(evaluated.xpEarned).toBe(20 + 50 + 80 + 100);
+  });
+
+  it('tracks partial progress on multi-step missions', () => {
+    const signals: QuestSignal[] = [
+      { at: at(12), kind: 'payment' },
+      { at: at(13), kind: 'payment' },
+    ];
+    const roll = evaluateDay(signals, day, now).missions.find(m => m.id === 'three-payments')!;
+    expect(roll.progress).toBe(2);
+    expect(roll.complete).toBe(false);
+  });
+
+  it('counts consecutive active days as a streak', () => {
+    const signals: QuestSignal[] = [
+      { at: new Date(2026, 7, 18, 9).getTime(), kind: 'login' },
+      { at: new Date(2026, 7, 17, 9).getTime(), kind: 'login' },
+      { at: new Date(2026, 7, 16, 9).getTime(), kind: 'login' },
+      // Gap on the 15th breaks the streak.
+      { at: new Date(2026, 7, 14, 9).getTime(), kind: 'login' },
+    ];
+    expect(currentStreak(signals, now)).toBe(3);
+  });
+
+  it('returns seven days for the rolling week', () => {
+    const week = rollingWeek([], now);
+    expect(week).toHaveLength(7);
+    expect(week[6].isToday).toBe(true);
+  });
+});
+
+describe('merchant campaign windows', () => {
+  const merchant = (over: Partial<Merchant> = {}): Merchant => ({
+    id: 'm', name: 'Kopitiam', amount: 5, xpRate: 10, xpBonus: 2,
+    campaignStart: null, campaignEnd: null, aliases: [], active: true, ...over,
+  });
+
+  it('applies an open-ended bonus at any time', () => {
+    expect(effectiveBonus(merchant(), Date.now())).toBe(2);
+  });
+
+  it('only pays the bonus inside the scheduled window', () => {
+    const m = merchant({
+      campaignStart: new Date('2026-08-01T00:00:00').getTime(),
+      campaignEnd: new Date('2026-08-31T23:59:59').getTime(),
+    });
+    expect(effectiveBonus(m, new Date('2026-07-20T12:00:00').getTime())).toBe(1);
+    expect(effectiveBonus(m, new Date('2026-08-15T12:00:00').getTime())).toBe(2);
+    expect(effectiveBonus(m, new Date('2026-09-05T12:00:00').getTime())).toBe(1);
+  });
+
+  it('ignores a window when there is no bonus to gate', () => {
+    expect(isCampaignActive(merchant({ xpBonus: 1 }))).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { query, queryOne, run } from './db';
+import { recordLogin } from './questStorage';
 
 export type ReminderFrequency =
   | 'hourly' | '3hours' | '5hours' | '12hours' | 'daily' | '48hours' | 'weekly' | 'custom';
@@ -80,6 +81,8 @@ export function switchUser(userId: string): void {
   const user = getAllUsers().find(u => u.id === userId);
   if (!user) return;
   localStorage.setItem(CURRENT_USER_KEY, user.id);
+  // Signing in counts as the day's check-in for the account being switched to.
+  recordLogin(user.id);
   window.dispatchEvent(new CustomEvent('userSwitched'));
 }
 

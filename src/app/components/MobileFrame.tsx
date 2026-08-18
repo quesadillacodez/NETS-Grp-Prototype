@@ -10,7 +10,7 @@ interface MobileFrameProps {
 }
 
 // Pages an admin IS allowed to stay on. Everything else redirects to /admin.
-const ADMIN_ALLOWED = ['/admin', '/manage-merchants'];
+const ADMIN_ALLOWED = ['/admin', '/manage-merchants', '/merchant-analytics'];
 
 function AdminRedirectGuard() {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ function AdminRedirectGuard() {
   }
   // Non-admin who ended up on an admin-only page (e.g. just switched away from
   // the admin account inside the portal) → send back to home.
-  if (!admin && (path === '/admin' || path === '/manage-merchants')) {
+  if (!admin && ADMIN_ALLOWED.includes(path)) {
     queueMicrotask(() => navigate('/', { replace: true }));
   }
   void tick;

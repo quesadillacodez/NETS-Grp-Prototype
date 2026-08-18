@@ -1,6 +1,8 @@
 import { lastInsertId, query, run } from './db';
 import { getDeals } from './dealStorage';
-import { DEFAULT_XP_RATE, getMerchantByName } from './merchantStorage';
+import { DEFAULT_XP_RATE, effectiveBonus, getMerchantByName } from './merchantStorage';
+import { evaluateDay, getQuestSignals, dayKey, type QuestSignal } from './questStorage';
+import { buildLedger, type XPLedger, type XPLedgerInput } from './xpLedger';
 
 export type RewardCategory = 'Cashback' | 'Vouchers' | 'Partner Deals';
 
@@ -33,7 +35,7 @@ export interface XPHistoryEntry {
   title: string;
   subtitle: string;
   xp: number;
-  type: 'earn' | 'spend';
+  type: 'earn' | 'spend' | 'refund';
   createdAt: number;
   bonus?: string;
 }
@@ -116,23 +118,45 @@ function isHeartlandMerchant(name: string): boolean {
   return HEARTLAND_KEYWORDS.some(keyword => normalized.includes(keyword));
 }
 
-// Merchants configured in the management portal carry their own XP rate and
-// bonus multiplier; anything else falls back to the standard rate plus the
-// automatic heartland bonus.
-export function calculateTransactionXP(name: string, amount: number): { xp: number; bonus?: string } {
+/**
+ * XP a payment earns before the tier multiplier.
+ *
+ * Merchants configured in the management portal carry their own XP rate and
+ * bonus multiplier; anything else falls back to the standard rate plus the
+ * automatic heartland bonus. `at` is the time of the payment, so a scheduled
+ * campaign only pays out for transactions inside its window - historical
+ * transactions keep the rate that was live when they happened.
+ */
+export function calculateTransactionXP(
+  name: string,
+  amount: number,
+  at: number = Date.now(),
+): { xp: number; bonus?: string } {
   if (amount >= 0) return { xp: 0 };
   const spend = Math.abs(amount);
   const merchant = getMerchantByName(name);
 
   if (merchant) {
-    const xp = Math.max(1, Math.round(spend * merchant.xpRate * merchant.xpBonus));
-    return merchant.xpBonus > 1 ? { xp, bonus: `${merchant.xpBonus}x merchant bonus` } : { xp };
+    const bonus = effectiveBonus(merchant, at);
+    const xp = Math.max(1, Math.round(spend * merchant.xpRate * bonus));
+    return bonus > 1 ? { xp, bonus: `${bonus}x merchant bonus` } : { xp };
   }
 
   const base = Math.max(1, Math.round(spend * DEFAULT_XP_RATE));
   if (isHeartlandMerchant(name)) return { xp: base * 2, bonus: 'Heartland 2x' };
   return { xp: base };
 }
+
+/**
+ * Earn multiplier granted by the user's tier. Kept deliberately small so it
+ * rewards loyalty without dwarfing the merchant campaigns it stacks with -
+ * the ceiling is a 2x heartland campaign at the top tier, i.e. 2.6x.
+ */
+export function tierMultiplier(level: number): number {
+  return TIER_MULTIPLIERS[level - 1] ?? 1;
+}
+
+const TIER_MULTIPLIERS = [1, 1.1, 1.2, 1.3];
 
 export function getRewardRedemptions(userId: string): RewardRedemption[] {
   return query('SELECT * FROM reward_redemptions WHERE user_id = ? ORDER BY redeemed_at DESC', [userId])
@@ -149,6 +173,53 @@ export function getRewardRedemptions(userId: string): RewardRedemption[] {
     }));
 }
 
+/**
+ * Applies the tier multiplier to a chronological run of earn entries.
+ *
+ * Each entry is multiplied by the tier the user actually held at that moment,
+ * derived from the total accumulated by the entries before it. Every step only
+ * reads earlier totals, so there is no circularity between "tier determines
+ * earnings" and "earnings determine tier".
+ */
+export function applyTierMultipliers(entries: XPHistoryEntry[]): XPHistoryEntry[] {
+  const ascending = [...entries].sort((a, b) => a.createdAt - b.createdAt);
+  let lifetime = 0;
+  return ascending.map(entry => {
+    if (entry.type !== 'earn') return entry;
+    const level = getTier(lifetime).level;
+    const multiplier = tierMultiplier(level);
+    const xp = Math.max(1, Math.round(entry.xp * multiplier));
+    lifetime += xp;
+    if (multiplier === 1) return { ...entry, xp };
+    const suffix = `${multiplier}x tier bonus`;
+    return { ...entry, xp, bonus: entry.bonus ? `${entry.bonus} + ${suffix}` : suffix };
+  });
+}
+
+/** Quest XP for every day the user completed at least one mission. */
+function getQuestEntries(signals: QuestSignal[]): XPHistoryEntry[] {
+  const days = new Set(signals.map(signal => dayKey(signal.at)));
+  const entries: XPHistoryEntry[] = [];
+  for (const day of days) {
+    const evaluated = evaluateDay(signals, day);
+    const done = evaluated.missions.filter(mission => mission.complete);
+    if (done.length === 0) continue;
+    entries.push({
+      id: `quest-${day}`,
+      title: `Daily missions - ${done.length} complete`,
+      subtitle: done.map(mission => mission.title).join(', '),
+      xp: evaluated.xpEarned,
+      type: 'earn',
+      // Credit at the end of the day the missions were completed.
+      createdAt: evaluated.date.getTime() + 23 * 60 * 60 * 1000,
+      bonus: done.length === MISSION_COUNT ? 'All missions cleared' : undefined,
+    });
+  }
+  return entries;
+}
+
+const MISSION_COUNT = 5;
+
 export function getXPHistory(userId: string): XPHistoryEntry[] {
   const transactions = query(
     `SELECT id, name, amount, date, created_at, kind, status
@@ -158,17 +229,39 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     [userId],
   );
   const earned: XPHistoryEntry[] = transactions.map(row => {
-    const result = calculateTransactionXP(String(row.name), Number(row.amount));
+    const at = Number(row.created_at ?? row.id);
+    const result = calculateTransactionXP(String(row.name), Number(row.amount), at);
     return {
       id: `txn-${row.id}`,
       title: String(row.name),
       subtitle: `NETS payment - $${Math.abs(Number(row.amount)).toFixed(2)}`,
       xp: result.xp,
       type: 'earn',
-      createdAt: Number(row.created_at ?? row.id),
+      createdAt: at,
       bonus: result.bonus,
     };
   });
+
+  // A refunded payment claws back the XP it earned, so the ledger keeps an
+  // explicit reversal rather than silently recomputing a smaller balance.
+  const refunds: XPHistoryEntry[] = query(
+    `SELECT id, name, amount, created_at, payment_id
+       FROM transactions
+      WHERE user_id = ? AND kind = 'refund'`,
+    [userId],
+  ).map(row => {
+    const at = Number(row.created_at ?? row.id);
+    const result = calculateTransactionXP(String(row.name), -Math.abs(Number(row.amount)), at);
+    return {
+      id: `refund-${row.id}`,
+      title: String(row.name),
+      subtitle: `Refund - $${Math.abs(Number(row.amount)).toFixed(2)} returned`,
+      xp: result.xp,
+      type: 'refund' as const,
+      createdAt: at,
+    };
+  });
+
   const spent: XPHistoryEntry[] = getRewardRedemptions(userId).map(redemption => ({
     id: `redemption-${redemption.id}`,
     title: redemption.title,
@@ -185,19 +278,31 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     type: 'earn',
     createdAt: 1,
   };
-  return [welcome, ...earned, ...spent].sort((a, b) => b.createdAt - a.createdAt);
+
+  const quests = getQuestEntries(getQuestSignals(userId));
+  const withTiers = applyTierMultipliers([welcome, ...earned, ...quests]);
+  return [...withTiers, ...spent, ...refunds].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** The user's XP ledger: balance, lots and the full audit trail. */
+export function getXPLedger(userId: string): XPLedger {
+  return buildLedger(getXPHistory(userId) as XPLedgerInput[]);
 }
 
 export function getXPStats(userId: string): {
+  /** Spendable XP, after expiry and refunds. */
   currentXP: number;
   lifetimeXP: number;
   spentXP: number;
+  expiredXP: number;
+  refundedXP: number;
+  expiringSoon: number;
+  expiringSoonAt: number | null;
   earnedThisMonth: number;
   transactionCount: number;
 } {
   const history = getXPHistory(userId);
-  const lifetimeXP = history.filter(entry => entry.type === 'earn').reduce((sum, entry) => sum + entry.xp, 0);
-  const spentXP = history.filter(entry => entry.type === 'spend').reduce((sum, entry) => sum + entry.xp, 0);
+  const ledger = buildLedger(history as XPLedgerInput[]);
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -205,9 +310,14 @@ export function getXPStats(userId: string): {
     .filter(entry => entry.type === 'earn' && entry.createdAt >= monthStart.getTime())
     .reduce((sum, entry) => sum + entry.xp, 0);
   return {
-    currentXP: Math.max(0, lifetimeXP - spentXP),
-    lifetimeXP,
-    spentXP,
+    currentXP: ledger.balance,
+    // Tier standing is lifetime XP *earned*, so expiry never demotes anyone.
+    lifetimeXP: ledger.totalEarned,
+    spentXP: ledger.totalSpent,
+    expiredXP: ledger.totalExpired,
+    refundedXP: ledger.totalRefunded,
+    expiringSoon: ledger.expiringSoon,
+    expiringSoonAt: ledger.expiringSoonAt,
     earnedThisMonth,
     transactionCount: history.filter(entry => entry.id.startsWith('txn-')).length,
   };

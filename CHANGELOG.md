@@ -5,7 +5,7 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
-## XP that means something: tiers, a ledger and daily missions
+## XP that means something: tiers, a ledger and daily missions — `3cacd3c`, `4433098`
 
 The XP Store rewarded a lifetime total and nothing else. Four things changed.
 
@@ -15,8 +15,7 @@ earned exactly what a new user earned. Each tier now carries an earn multiplier
 is a top-tier customer at a 2x heartland stall: 2.6x. The multiplier applied to
 a payment is the tier the user held *at that moment*, computed in a forward pass
 over history, so there is no circularity between "tier decides earnings" and
-"earnings decide tier". Tapping the balance card opens the full ladder with its
-breakpoints and an animated bar showing how far along you are.
+"earnings decide tier".
 
 **XP has a ledger.** The balance was recomputed on every read as lifetime earned
 minus lifetime spent, which left nowhere to express expiry, refunds or an audit
@@ -31,10 +30,8 @@ daily missions on a calendar — check in, pay with NETS, support a heartland
 stall, three payments in a day, split a bill — evaluated per day against real
 activity, so they reset on their own with no scheduled job.
 
-**Where XP came from.** "This month" opens a breakdown of the XP each payment
-earned, with a month tab strip, a top source and the bonus XP that month.
-
-The store also gained an "I can afford this now" filter.
+**An affordability filter.** The store gained an "I can afford this now" toggle,
+counting what the current balance actually covers.
 
 ### Merchant side
 
@@ -53,6 +50,59 @@ The store also gained an "I can afford this now" filter.
   history, restorable.
 - **XP analytics.** A new screen reports XP issued, what the bonus cost and
   campaign uplift against non-campaign days, per merchant.
+
+### Reconciling with main — `4433098`
+
+Main had independently grown a merchant portal, paid reward promotions, voucher
+expiry and a transaction model while this work built the XP engine, so the two
+were reconciled rather than concatenated. Main's surfaces won where they
+overlapped — the portal and `promotionStorage` remain the merchant-facing story,
+and the fabricated transaction seeding this branch had extended is gone in
+favour of main's deliberate "activity is created only by using the app". The XP
+engine was rebuilt on main's `rewardStorage`. `merchantInsights` now routes
+through the single matching rule, and its tests moved to it, including the case
+the loose rule got wrong.
+
+`47c8057` follows up: `merchantAnalytics` and `questStorage` read purchases
+through the shared `getPurchases`/`classifyTransaction` helpers instead of their
+own SQL, so XP issued, missions and the portal's sales all describe one set of
+rows.
+
+### Two bugs the end-to-end suite caught — `5cd5804`, `d8a975e`
+
+- **The welcome bonus expired in 1970.** The starter bonus is pinned to
+  `createdAt: 1` as a sort sentinel, not a real date. The new expiry rule read
+  it as a real date and lapsed it immediately, so a new customer opened the
+  store holding 20 XP instead of 500 and could not redeem anything. Ledger
+  entries can now be marked as never expiring; such a lot is excluded from
+  "expiring soon" and reads as "Never expires" rather than an Invalid Date,
+  while still being spent first by FIFO.
+- **A test encoded a fixture assumption that daily missions broke.** The
+  paid-placement test asserted a 600 XP reward reads as locked *because* "Alex
+  starts with 500 XP". Balances now depend on the day's activity. The test reads
+  the displayed balance and asserts the label matches real affordability, so it
+  still fails in either direction and does not rot when earning rules change.
+
+---
+
+## Seeing where XP comes from: tiers and a monthly breakdown — `d13e3e0`
+
+Groundwork for the above, landed first.
+
+- **The balance card opens the tier ladder.** Tapping it shows every tier, its
+  XP breakpoints, which are unlocked, and an animated bar for progress through
+  the current one. The ladder moved into a single exported `TIERS` list that
+  `getTier` walks, replacing a hardcoded if-chain, so the badge and the sheet
+  cannot disagree.
+- **"This month" opens a breakdown.** A new `/xp-breakdown` screen lists the XP
+  each payment earned in a chosen month, with a month tab strip, the top source
+  and that month's bonus XP. Repeat visits to one stall group into a single
+  source.
+- **Merchant XP settings became reachable.** `xpRate` and `xpBonus` already
+  drove earning and were carried through on edit, but no form exposed them, so
+  every merchant added through the portal was stuck at 10 XP per $1 with no
+  multiplier. Both are now editable, with validation and a live preview of the
+  XP a customer would earn.
 
 ---
 

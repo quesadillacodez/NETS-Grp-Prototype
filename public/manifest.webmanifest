@@ -1,0 +1,40 @@
+{
+  "id": "/",
+  "name": "NETS Pay Together",
+  "short_name": "NETS Together",
+  "description": "Pay, split bills, track repayments and enjoy rewards together with NETS.",
+  "start_url": "/login?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#041b42",
+  "theme_color": "#041b42",
+  "categories": ["finance", "lifestyle"],
+  "lang": "en-SG",
+  "icons": [
+    {
+      "src": "/nets-icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/nets-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/nets-maskable.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Scan to pay", "short_name": "Scan", "url": "/scan", "icons": [{ "src": "/nets-icon.svg", "sizes": "192x192", "type": "image/svg+xml" }] },
+    { "name": "Split a bill", "short_name": "Split", "url": "/split-setup", "icons": [{ "src": "/nets-icon.svg", "sizes": "192x192", "type": "image/svg+xml" }] },
+    { "name": "Rewards", "short_name": "Rewards", "url": "/rewards", "icons": [{ "src": "/nets-icon.svg", "sizes": "192x192", "type": "image/svg+xml" }] }
+  ]
+}

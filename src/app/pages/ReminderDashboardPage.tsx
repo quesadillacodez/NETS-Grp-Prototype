@@ -6,6 +6,7 @@ import { NETSLogo } from '../components/NETSLogo';
 import { NotificationPopup } from '../components/NotificationPopup';
 import { getRemindersToReceive, getRemindersToPay, markReminderAsPaid, getAllReminders, getUserInsights } from '../utils/reminderStorage';
 import { addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
+import { categorizeMerchant } from '../utils/spendingInsights';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { toast } from 'sonner';
@@ -93,12 +94,15 @@ function ReminderCard({ reminder, tab, insights, onPay, onViewStatus }: {
             {reminder.scheduledDate && reminder.scheduledTime && tab === 'to-receive' && (
               <p className="text-xs text-orange-600 mt-0.5">📅 {reminder.scheduledDate} at {reminder.scheduledTime}</p>
             )}
-            {personInsight && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {personInsight.averageReminderCount}x avg
-                {personInsight.paidReminders > 0 && ` · ${personInsight.averagePaymentTime}d avg pay`}
-              </p>
-            )}
+            {personInsight && personInsight.paidReminders > 0 && tab === 'to-receive' && (() => {
+              const d = personInsight.averagePaymentTime;
+              const label = d < 1 ? 'Usually pays same day' : d < 1.5 ? 'Usually pays in ~1 day' : `Usually pays in ~${Math.round(d)} days`;
+              return (
+                <p className={`text-xs mt-0.5 font-medium ${d <= 2 ? 'text-success' : 'text-muted-foreground'}`}>
+                  🕐 {label}
+                </p>
+              );
+            })()}
           </div>
         </div>
         <div className="text-right">
@@ -109,6 +113,12 @@ function ReminderCard({ reminder, tab, insights, onPay, onViewStatus }: {
 
       {reminder.status !== 'paid' && (
         <div className="flex gap-2">{actionButtons()}</div>
+      )}
+
+      {reminder.status === 'paid' && reminder.thankYou && (
+        <div className="mt-2 bg-success/10 border border-success/20 rounded-xl px-3 py-2">
+          <p className="text-xs text-success font-medium">{reminder.thankYou}</p>
+        </div>
       )}
     </div>
   );
@@ -190,6 +200,20 @@ function InsightsTab({ insights }: { insights: any[] }) {
   );
 }
 
+function ReliabilityBadge({ score }: { score: number | null }) {
+  if (score === null) return null;
+  const isReliable = score >= 70;
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
+        isReliable ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+      }`}
+    >
+      {score}% reliable
+    </span>
+  );
+}
+
 function InsightCard({ insight }: { insight: any }) {
   const [expanded, setExpanded] = useState<'paid' | 'pending' | null>(null);
   const currentUser = getCurrentUser();
@@ -210,7 +234,10 @@ function InsightCard({ insight }: { insight: any }) {
       <div className="flex items-center gap-2 mb-3">
         <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-xl">{insight.avatar}</div>
         <div>
-          <p className="font-bold text-sm text-foreground">{insight.userName}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-bold text-sm text-foreground">{insight.userName}</p>
+            <ReliabilityBadge score={insight.reliabilityScore} />
+          </div>
           <p className="text-xs text-muted-foreground">{insight.totalReminders} reminder{insight.totalReminders !== 1 ? 's' : ''}</p>
         </div>
       </div>
@@ -326,7 +353,7 @@ export function ReminderDashboardPage() {
     } else {
       const paid = markReminderAsPaid(reminder.id);
       if (paid) {
-        addTransaction({ name: paid.toUserName, amount: paid.amount, date: formatDateForTransaction(), category: paid.category, status: 'received', kind: 'transfer' }, currentUser.id);
+        addTransaction({ name: paid.toUserName, amount: paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'received', kind: 'repayment_received' }, currentUser.id);
         toast.success(`Payment received from ${paid.toUserName}`);
         setRemindersToReceive(getRemindersToReceive(currentUser.id));
         setRemindersToPay(getRemindersToPay(currentUser.id));

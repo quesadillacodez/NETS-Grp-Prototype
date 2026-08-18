@@ -4,3 +4,27 @@ tmp
 .env
 *.local
 .DS_Store
+
+# Project uses npm (see .github/workflows/ci.yml); a committed pnpm-lock.yaml
+# alongside package-lock.json makes package-manager auto-detection (e.g. on
+# Vercel) ambiguous, and a fresh `pnpm install` of this dependency graph
+# breaks outright under Node 22. Use pnpm locally if you want, just don't
+# commit its lockfile.
+pnpm-lock.yaml
+
+# Playwright
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
+
+# Runtime server state (contains credential hashes and sessions)
+/server/data/
+/tmp/*.json
+
+# Dev-only readable mirrors of the browser database
+/database/snapshot.md
+/database/tables/*.csv
+
+# Generated presentation inspection traces (the deck and preview images remain tracked)
+*.inspect.ndjson

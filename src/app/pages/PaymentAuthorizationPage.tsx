@@ -5,7 +5,7 @@ import { Check, Shield, CreditCard, X, Fingerprint } from 'lucide-react';
 import { markReminderAsPaid } from '../utils/reminderStorage';
 import { addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
 import { getCurrentUser } from '../utils/userStorage';
-import { deleteNotificationByReminder } from '../utils/notificationStorage';
+import { deleteNotificationByReminder, addNotification } from '../utils/notificationStorage';
 import { createSimulatedAuthorization } from '../utils/securePayment';
 import { categorizeMerchant } from '../utils/spendingInsights';
 
@@ -34,15 +34,32 @@ export function PaymentAuthorizationPage() {
       setAuthStatus('approved');
 
       if (reminder) {
-        const paid = markReminderAsPaid(reminder.id);
+        const THANK_YOU = '🙏 Thanks for covering!';
+        const paid = markReminderAsPaid(reminder.id, THANK_YOU);
         if (paid) {
           deleteNotificationByReminder(reminder.id);
           // Settling a split bill is a real expense for the person paying it
           // back, so it carries the original bill's spending category and shows
-          // up in their dashboard and budgets. It stays a transfer rather than a
+          // up in their dashboard and budgets. It is a repayment rather than a
           // purchase because the payer already earned the XP at the merchant.
-          addTransaction({ name: `${paid.category} (split with ${paid.fromUserName})`, amount: -paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'sent', kind: 'transfer' }, currentUser.id);
-          addTransaction({ name: currentUser.name, amount: paid.amount, date: formatDateForTransaction(), category: paid.category, status: 'received', kind: 'transfer' }, paid.fromUserId);
+          addTransaction({ name: `${paid.category} (split with ${paid.fromUserName})`, amount: -paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'sent', kind: 'repayment_sent' }, currentUser.id);
+          addTransaction({ name: currentUser.name, amount: paid.amount, date: formatDateForTransaction(), category: categorizeMerchant(paid.category), status: 'received', kind: 'repayment_received' }, paid.fromUserId);
+          // Notify the payer (who is owed the money) that this person paid them
+          // back, with the thank-you note — so they see it from their side.
+          addNotification({
+            userId: paid.fromUserId,
+            fromUserId: currentUser.id,
+            fromUserName: currentUser.name,
+            fromUserAvatar: currentUser.avatar,
+            message: `${currentUser.name} paid you back · ${THANK_YOU}`,
+            amount: paid.amount,
+            category: paid.category,
+            timestamp: new Date().toISOString(),
+            read: false,
+            reminderId: paid.id,
+            channel: 'payments',
+            link: '/reminders',
+          });
         }
       }
 
@@ -75,9 +92,14 @@ export function PaymentAuthorizationPage() {
           )}
         </motion.div>
 
-        <motion.div key={authStatus} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-12">
+        <motion.div key={authStatus} role="status" aria-live="assertive" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-12">
           <h1 className="text-3xl font-bold text-white mb-3">{statusText.title}</h1>
           <p className="text-white/70 text-lg">{statusText.subtitle}</p>
+          <span className="sr-only">
+            {authStatus === 'approved'
+              ? `Payment of $${amount?.toFixed(2)} to ${recipientName} was authorized.`
+              : authStatus === 'authorizing' ? 'Processing your payment, please wait.' : ''}
+          </span>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="w-full max-w-sm bg-white/10 backdrop-blur-md rounded-3xl p-6 border border-white/20 mb-8">

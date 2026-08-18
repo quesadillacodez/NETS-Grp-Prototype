@@ -37,7 +37,7 @@ function startOfDay(ts: number): number {
 }
 
 export function getAdminStats(): AdminStats {
-  const totalUsers = num('SELECT COUNT(*) FROM users WHERE COALESCE(is_admin,0) = 0');
+  const totalUsers = num("SELECT COUNT(*) FROM users WHERE COALESCE(is_admin,0) = 0 AND COALESCE(merchant_id,'') = ''");
   const totalTransactions = num('SELECT COUNT(*) FROM transactions');
   const dealsRedeemed = num('SELECT COUNT(*) FROM reward_redemptions');
   const hangoutsPlanned = num('SELECT COUNT(*) FROM hangouts');
@@ -108,7 +108,7 @@ export interface UserActivity {
 }
 
 export function getUserActivity(): UserActivity[] {
-  const users = query('SELECT id, name, avatar FROM users WHERE COALESCE(is_admin,0) = 0 ORDER BY name');
+  const users = query("SELECT id, name, avatar FROM users WHERE COALESCE(is_admin,0) = 0 AND COALESCE(merchant_id,'') = '' ORDER BY name");
   return users.map(u => {
     const id = String(u.id);
     return {

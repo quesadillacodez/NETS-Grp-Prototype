@@ -9,7 +9,13 @@ interface AccountSwitcherProps {
   onClose: () => void;
 }
 
-export function AccountSwitcher({ isOpen, onClose }: AccountSwitcherProps) {
+export function AccountSwitcher(_props: AccountSwitcherProps) {
+  // Account switching is disabled: users sign in with their own PIN, so there's
+  // no in-app switcher. Kept as a no-op so existing call sites don't break.
+  return null;
+}
+
+function DisabledAccountSwitcher({ isOpen, onClose }: AccountSwitcherProps) {
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [allUsers] = useState(getAllUsers());
 

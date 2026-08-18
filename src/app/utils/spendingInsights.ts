@@ -1,4 +1,5 @@
 import { query } from './db';
+import { classifyTransaction, countsAsSpending, type TransactionType } from './transactionModel';
 
 // ─── Category derivation ─────────────────────────────────────────────────────
 // Real transactions store category as 'payment' / 'topup', so we derive a
@@ -20,7 +21,7 @@ const CATEGORY_META: Record<SpendCategory, { color: string; emoji: string }> = {
 
 const KEYWORDS: [SpendCategory, string[]][] = [
   ['Groceries', ['fairprice', 'ntuc', 'giant', 'cold storage', 'sheng siong', 'grocery', 'supermarket']],
-  ['Food & Dining', ['starbucks', 'kopitiam', 'hawker', 'breadtalk', 'din tai fung', 'mcdonald', 'kfc', 'restaurant', 'cafe', 'coffee', 'food', 'bev eat', 'chan', 'bakery', 'eatery', 'toast']],
+  ['Food & Dining', ['starbucks', 'kopitiam', 'hawker', 'breadtalk', 'din tai fung', 'mcdonald', 'kfc', 'restaurant', 'cafe', 'coffee', 'food', 'bev eat', 'chan', 'bakery', 'eatery', 'toast', 'bubble tea', 'boba', 'milk tea', 'liho', 'gong cha', 'chagee']],
   ['Transport', ['grab', 'gojek', 'taxi', 'mrt', 'bus', 'transit', 'comfort', 'shell', 'esso', 'petrol', 'fuel', 'ez-link', 'ezlink']],
   ['Healthcare', ['guardian', 'pharmacy', 'clinic', 'hospital', 'watsons', 'unity', 'health', 'dental', 'cvs']],
   ['Entertainment', ['netflix', 'spotify', 'disney', 'cinema', 'gv', 'cathay', 'ktv', 'game', 'steam', 'movie']],
@@ -55,18 +56,7 @@ export function categoryColor(cat: SpendCategory): string { return CATEGORY_META
 export function categoryEmoji(cat: SpendCategory): string { return CATEGORY_META[cat].emoji; }
 
 // ─── Raw spend rows for a user ───────────────────────────────────────────────
-type FlowKind = 'purchase' | 'income' | 'topup' | 'transfer' | 'cashback' | 'refund';
-interface SpendRow { name: string; amount: number; ts: number; kind: FlowKind; category: SpendCategory; }
-
-export function inferTransactionKind(row: Record<string, unknown>): FlowKind {
-  if (row.kind) return String(row.kind) as FlowKind;
-  const category = String(row.category ?? '').toLowerCase();
-  const status = String(row.status ?? '').toLowerCase();
-  if (status === 'sent' || status === 'received') return 'transfer';
-  if (category === 'topup' || /top.?up/.test(String(row.name))) return 'topup';
-  if (category === 'reward' || /cashback/.test(String(row.name))) return 'cashback';
-  return Number(row.amount) < 0 ? 'purchase' : 'income';
-}
+interface SpendRow { name: string; amount: number; ts: number; kind: TransactionType; category: SpendCategory; }
 
 function getSpendRows(userId: string): SpendRow[] {
   const rows = query(
@@ -77,7 +67,7 @@ function getSpendRows(userId: string): SpendRow[] {
     name: String(r.name),
     amount: Number(r.amount),
     ts: r.created_at != null ? Number(r.created_at) : Date.parse(String(r.date)) || Date.now(),
-    kind: inferTransactionKind(r),
+    kind: classifyTransaction(r),
     category: resolveSpendCategory(String(r.name), r.category == null ? undefined : String(r.category)),
   }));
 }
@@ -85,7 +75,7 @@ function getSpendRows(userId: string): SpendRow[] {
 // Anything leaving the wallet counts as spending: merchant purchases plus the
 // outgoing side of a split-bill settlement, which is the user's own share.
 function isSpend(row: SpendRow): boolean {
-  return row.amount < 0 && (row.kind === 'purchase' || row.kind === 'transfer');
+  return countsAsSpending(row);
 }
 
 function inMonth(ts: number, year: number, month: number): boolean {
@@ -137,20 +127,25 @@ export function getSpendingTrend(userId: string, months = 6): TrendPoint[] {
 // ─── Summary stats (this month vs last) ──────────────────────────────────────
 export interface SpendSummary {
   spentThisMonth: number; spentLastMonth: number; moneyInThisMonth: number;
-  netCashFlow: number; earnedIncomeThisMonth: number; topCategory: CategorySlice | null;
+  netCashFlow: number; topCategory: CategorySlice | null;
   txnCount: number;
+  /** Money in, split by where it came from — none of it is salary income. */
+  topUpsThisMonth: number; cashbackThisMonth: number; repaymentsThisMonth: number;
 }
 
 export function getSpendSummary(userId: string, year: number, month: number): SpendSummary {
   const rows = getSpendRows(userId);
   const prev = new Date(year, month - 1, 1);
-  let spent = 0, moneyIn = 0, earnedIncome = 0, txnCount = 0, spentPrev = 0;
+  let spent = 0, moneyIn = 0, txnCount = 0, spentPrev = 0;
+  let topUps = 0, cashback = 0, repayments = 0;
   rows.forEach((r) => {
     if (inMonth(r.ts, year, month)) {
       if (isSpend(r)) { spent += Math.abs(r.amount); txnCount++; }
       else if (r.amount > 0) {
         moneyIn += r.amount;
-        if (r.kind === 'income') earnedIncome += r.amount;
+        if (r.kind === 'topup') topUps += r.amount;
+        else if (r.kind === 'cashback') cashback += r.amount;
+        else if (r.kind === 'repayment_received') repayments += r.amount;
       }
     } else if (inMonth(r.ts, prev.getFullYear(), prev.getMonth())) {
       if (isSpend(r)) spentPrev += Math.abs(r.amount);
@@ -160,7 +155,9 @@ export function getSpendSummary(userId: string, year: number, month: number): Sp
   return {
     spentThisMonth: +spent.toFixed(2), spentLastMonth: +spentPrev.toFixed(2),
     moneyInThisMonth: +moneyIn.toFixed(2), netCashFlow: +(moneyIn - spent).toFixed(2),
-    earnedIncomeThisMonth: +earnedIncome.toFixed(2), topCategory: cats[0] ?? null, txnCount,
+    topCategory: cats[0] ?? null, txnCount,
+    topUpsThisMonth: +topUps.toFixed(2), cashbackThisMonth: +cashback.toFixed(2),
+    repaymentsThisMonth: +repayments.toFixed(2),
   };
 }
 

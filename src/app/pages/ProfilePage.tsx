@@ -1,48 +1,34 @@
 import { useState } from 'react';
-import { ChevronRight, User, CreditCard, Bell, Lock, HelpCircle, Users, Trash2, Clock, Database, Shield, Sparkles, LogOut } from 'lucide-react';
+import { ChevronRight, User, CreditCard, Bell, Lock, HelpCircle, SlidersHorizontal, Clock, Shield, Sparkles, LogOut } from 'lucide-react';
 import { NETSLogo } from '../components/NETSLogo';
 import { BottomNav } from '../components/BottomNav';
 import { AccountSwitcher } from '../components/AccountSwitcher';
 import { getCurrentUser, isAdminUser } from '../utils/userStorage';
-import { markUserClearedFresh, flushSave, resetDatabase } from '../utils/db';
-import { seedTestReminders } from '../utils/seedTestData';
+import { getUnreadCount } from '../utils/notificationStorage';
 import { useAppEvents } from '../utils/useAppEvents';
 import { useNavigate } from 'react-router';
 import { logout } from '../utils/authStorage';
+import { InstallAppCard } from '../components/InstallAppCard';
 
 const MENU_ITEMS = [
-  { icon: User,        label: 'Personal Information', color: 'from-blue-500 to-blue-600',   path: null },
-  { icon: CreditCard,  label: 'Payment Methods',      color: 'from-purple-500 to-purple-600', path: null },
-  { icon: Bell,        label: 'Notifications',         color: 'from-green-500 to-green-600',  path: null },
-  { icon: Clock,       label: 'Reminder Settings',    color: 'from-indigo-500 to-indigo-600', path: '/reminder-settings' },
-  { icon: Lock,        label: 'Security & Privacy',   color: 'from-orange-500 to-orange-600', path: null },
-  { icon: HelpCircle,  label: 'Help & Support',       color: 'from-pink-500 to-pink-600',    path: null },
+  { icon: User,        label: 'Personal Information', description: 'Name, email and mobile number',        color: 'from-blue-500 to-blue-600',     path: '/profile/personal' },
+  { icon: CreditCard,  label: 'Payment Methods',      description: 'Wallet, bank accounts and cards',       color: 'from-purple-500 to-purple-600', path: '/profile/payment-methods' },
+  { icon: Bell,        label: 'Notifications',        description: 'History, filters and push settings',    color: 'from-green-500 to-green-600',   path: '/notifications' },
+  { icon: Clock,       label: 'Reminder Settings',    description: 'How often friends are nudged',          color: 'from-indigo-500 to-indigo-600', path: '/reminder-settings' },
+  { icon: Lock,        label: 'Security & Privacy',   description: 'Change PIN, policies and terms',        color: 'from-orange-500 to-orange-600', path: '/profile/security' },
+  { icon: HelpCircle,  label: 'Help & Support',       description: 'FAQs, report an issue, contact us',     color: 'from-pink-500 to-pink-600',     path: '/profile/help' },
 ];
 
 export function ProfilePage() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   useAppEvents(['userSwitched'], () => setCurrentUser(getCurrentUser()));
-
-  const handleClearData = async () => {
-    if (!confirm('Reset all prototype data, including transactions, plans, rewards, reminders, budgets, merchants and admin catalogue changes?\n\nThis cannot be undone.')) return;
-    resetDatabase();
-    markUserClearedFresh();
-    await flushSave();
-    alert('✓ All data cleared! Everyone starts fresh — $2,500 balance, 0 transactions, 0 redemptions.');
-    window.location.reload();
-  };
-
-  const handleSeedTestData = () => {
-    const isAlex = currentUser.name === 'Alex Chen';
-    if (!isAlex) alert(`Note: Test data is created for Alex Chen's account.\n\nYou're currently: ${currentUser.name}\n\nSwitch to Alex Chen to see results.`);
-    if (!confirm('This will add test data. For best results, clear all data first. Continue?')) return;
-    seedTestReminders();
-    alert(`✓ Test data added!\n\n${isAlex ? 'You should now see:\n- Shared Bills: Hawker Haven ($156)\n- Insights: Sarah, Mike, Jenny' : 'Switch to Alex Chen to see the test data.'}`);
-    window.location.reload();
-  };
+  useAppEvents(['notificationsUpdated', 'userSwitched', 'databaseReady'], () => {
+    setUnread(getUnreadCount(getCurrentUser().id));
+  });
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -62,6 +48,7 @@ export function ProfilePage() {
       </div>
 
       <div className="flex-1 px-6 py-6 overflow-y-auto pb-24">
+        <InstallAppCard />
         {/* NETS Wrapped — the fun, personal side of the app */}
         <button
           onClick={() => navigate('/wrapped')}
@@ -112,19 +99,30 @@ export function ProfilePage() {
         <div className="space-y-3">
           {MENU_ITEMS.map((item) => {
             const Icon = item.icon;
+            const showBadge = item.path === '/notifications' && unread > 0;
             return (
               <button
                 key={item.label}
-                onClick={() => item.path && navigate(item.path)}
-                className="w-full flex items-center justify-between p-4 bg-secondary rounded-2xl hover:bg-secondary/80 transition-all"
+                onClick={() => navigate(item.path)}
+                className="w-full flex items-center justify-between gap-3 p-4 bg-secondary rounded-2xl hover:bg-secondary/80 transition-all text-left"
               >
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${item.color} flex items-center justify-center`}>
-                    <Icon className="w-6 h-6 text-white" />
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className={`w-12 h-12 flex-shrink-0 rounded-xl bg-gradient-to-br ${item.color} flex items-center justify-center`}>
+                    <Icon className="w-6 h-6 text-white" aria-hidden="true" />
                   </div>
-                  <span className="font-semibold text-foreground">{item.label}</span>
+                  <div className="min-w-0">
+                    <span className="font-semibold text-foreground">{item.label}</span>
+                    <p className="truncate text-xs text-muted-foreground">{item.description}</p>
+                  </div>
                 </div>
-                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  {showBadge && (
+                    <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-black text-white">
+                      {unread} new
+                    </span>
+                  )}
+                  <ChevronRight className="w-5 h-5 text-muted-foreground" aria-hidden="true" />
+                </div>
               </button>
             );
           })}
@@ -147,39 +145,27 @@ export function ProfilePage() {
             </button>
           )}
 
-          <button onClick={() => setShowAccountSwitcher(true)} className="w-full flex items-center justify-between p-4 bg-primary/10 rounded-2xl mt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-                <Users className="w-6 h-6 text-white" />
+          <button
+            onClick={() => navigate('/profile/demo')}
+            className="w-full flex items-center justify-between gap-3 p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl mt-6 text-left"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="w-12 h-12 flex-shrink-0 rounded-xl bg-amber-500 flex items-center justify-center">
+                <SlidersHorizontal className="w-6 h-6 text-white" aria-hidden="true" />
               </div>
-              <span className="font-semibold text-primary">Switch Account</span>
-            </div>
-            <ChevronRight className="w-5 h-5 text-primary" />
-          </button>
-
-          <button onClick={handleSeedTestData} className="w-full flex items-center justify-between p-4 bg-success/10 rounded-2xl mt-2">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-success flex items-center justify-center">
-                <Database className="w-6 h-6 text-white" />
+              <div className="min-w-0">
+                <span className="font-semibold text-amber-900 block">Demo Controls</span>
+                <p className="truncate text-xs text-amber-700/80">Reset or load a presentation scenario</p>
               </div>
-              <span className="font-semibold text-success">Add Test Data</span>
             </div>
-          </button>
-
-          <button onClick={handleClearData} className="w-full flex items-center justify-between p-4 bg-destructive/10 rounded-2xl mt-2">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-destructive flex items-center justify-center">
-                <Trash2 className="w-6 h-6 text-white" />
-              </div>
-              <span className="font-semibold text-destructive">Clear All Data</span>
-            </div>
+            <ChevronRight className="w-5 h-5 flex-shrink-0 text-amber-600" aria-hidden="true" />
           </button>
 
           <button onClick={() => { logout(); navigate('/login', { replace: true }); }}
             className="w-full flex items-center justify-between p-4 bg-secondary rounded-2xl mt-2">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-muted-foreground flex items-center justify-center">
-                <LogOut className="w-6 h-6 text-white" />
+                <LogOut className="w-6 h-6 text-white" aria-hidden="true" />
               </div>
               <span className="font-semibold text-foreground">Sign Out</span>
             </div>

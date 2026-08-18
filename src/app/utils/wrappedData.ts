@@ -1,4 +1,6 @@
 import { query } from './db';
+import { computeReliabilityScore } from './reminderStorage';
+import { calculateTransactionXP } from './rewardStorage';
 
 // ─── Types (mirror the original Wrapped feature) ─────────────────────────────
 export interface WrappedTxn {
@@ -107,6 +109,71 @@ export function getWrappedStats(year: number, month: number, txns: WrappedTxn[])
   };
 }
 
+// ─── Top merchants by visit count ─────────────────────────────────────────────
+export function getTopMerchants(year: number, month: number, txns: WrappedTxn[], limit = 3) {
+  const spending = filterByMonth(txns, year, month).filter((t) => t.amount < 0);
+  const counts: Record<string, number> = {};
+  const totals: Record<string, number> = {};
+  spending.forEach((t) => {
+    counts[t.merchant] = (counts[t.merchant] || 0) + 1;
+    totals[t.merchant] = (totals[t.merchant] || 0) + Math.abs(t.amount);
+  });
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count, total: parseFloat((totals[name] || 0).toFixed(2)) }));
+}
+
+// ─── Fun spending equivalence ─────────────────────────────────────────────────
+// Converts the month's total spend into a relatable Singapore-context count,
+// picking whichever item lands in a readable range instead of always using
+// the same one (nobody wants "0.3 movie tickets" or "8,000 kopis").
+const EQUIVALENTS = [
+  { emoji: '☕', label: 'kopis', price: 1.5 },
+  { emoji: '🧋', label: 'bubble teas', price: 5.5 },
+  { emoji: '🍜', label: 'hawker meals', price: 5 },
+  { emoji: '🎬', label: 'movie tickets', price: 14 },
+  { emoji: '🚗', label: 'Grab rides', price: 12 },
+] as const;
+
+// ─── XP earned ─────────────────────────────────────────────────────────────
+// Same formula the Rewards tab uses per transaction — summed over the month
+// Wrapped is currently showing, rather than the real calendar month getXPStats
+// assumes.
+export function getXPEarned(year: number, month: number, txns: WrappedTxn[]): number {
+  return filterByMonth(txns, year, month)
+    .filter((t) => t.amount < 0)
+    .reduce((sum, t) => sum + calculateTransactionXP(t.merchant, t.amount).xp, 0);
+}
+
+export function getFunEquivalent(totalSpent: number) {
+  if (totalSpent <= 0) return null;
+  const inRange = EQUIVALENTS
+    .map((e) => ({ ...e, count: totalSpent / e.price }))
+    .filter((e) => e.count >= 3 && e.count <= 60);
+  const picked = inRange[0] ?? { ...EQUIVALENTS[0], count: totalSpent / EQUIVALENTS[0].price };
+  return { emoji: picked.emoji, label: picked.label, count: Math.round(picked.count) };
+}
+
+// ─── Busiest day of the week ──────────────────────────────────────────────────
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export function getBusiestDay(year: number, month: number, txns: WrappedTxn[]) {
+  const spending = filterByMonth(txns, year, month).filter((t) => t.amount < 0);
+  if (spending.length === 0) return null;
+  const byDay: Record<number, { amount: number; count: number }> = {};
+  spending.forEach((t) => {
+    const day = t.date.getDay();
+    if (!byDay[day]) byDay[day] = { amount: 0, count: 0 };
+    byDay[day].amount += Math.abs(t.amount);
+    byDay[day].count += 1;
+  });
+  const [dayIndex, stats] = Object.entries(byDay)
+    .map(([d, s]) => [Number(d), s] as const)
+    .sort((a, b) => b[1].amount - a[1].amount)[0];
+  return { name: DAY_NAMES[dayIndex], amount: parseFloat(stats.amount.toFixed(2)), count: stats.count };
+}
+
 export function getSpendingComparison(year: number, month: number, txns: WrappedTxn[]) {
   const cur = getWrappedStats(year, month, txns);
   const prevDate = new Date(year, month - 1, 1);
@@ -195,24 +262,42 @@ export function getSplitBillStats(userId: string, year: number, month: number) {
   const hasPending = Object.keys(owedPending).length > 0;
   const biggestDebtorEntry = Object.entries(hasPending ? owedPending : owedAll).sort((a, b) => b[1] - a[1])[0];
 
-  // Slowest payer — real average days between created_date and paid_date.
+  // Slowest payer — real average days between created_date and paid_date. The
+  // same per-person paid/total counts also feed the most-reliable pick below.
   const daysByPerson: Record<string, { total: number; count: number }> = {};
+  const paidCountByPerson: Record<string, { paid: number; total: number }> = {};
   inMonth.forEach((r) => {
-    if (r.status === 'paid' && r.paid_date && r.created_date) {
-      const paid = new Date(String(r.paid_date)).getTime();
-      const created = new Date(String(r.created_date)).getTime();
-      if (!isNaN(paid) && !isNaN(created) && paid >= created) {
-        const days = Math.floor((paid - created) / (1000 * 60 * 60 * 24));
-        const name = String(r.name || 'Someone');
-        if (!daysByPerson[name]) daysByPerson[name] = { total: 0, count: 0 };
-        daysByPerson[name].total += days;
-        daysByPerson[name].count += 1;
+    const name = String(r.name || 'Someone');
+    if (!paidCountByPerson[name]) paidCountByPerson[name] = { paid: 0, total: 0 };
+    paidCountByPerson[name].total += 1;
+    if (r.status === 'paid') {
+      paidCountByPerson[name].paid += 1;
+      if (r.paid_date && r.created_date) {
+        const paid = new Date(String(r.paid_date)).getTime();
+        const created = new Date(String(r.created_date)).getTime();
+        if (!isNaN(paid) && !isNaN(created) && paid >= created) {
+          const days = Math.floor((paid - created) / (1000 * 60 * 60 * 24));
+          if (!daysByPerson[name]) daysByPerson[name] = { total: 0, count: 0 };
+          daysByPerson[name].total += days;
+          daysByPerson[name].count += 1;
+        }
       }
     }
   });
   const slowest = Object.entries(daysByPerson)
     .map(([name, d]) => ({ name, avgDays: d.total / d.count }))
     .sort((a, b) => b.avgDays - a.avgDays)[0];
+
+  // Most reliable — highest reliability score among people who paid back at
+  // least once this month, using the same formula as the Insights tab.
+  const mostReliableEntry = Object.entries(paidCountByPerson)
+    .filter(([, d]) => d.paid > 0)
+    .map(([name, d]) => {
+      const days = daysByPerson[name];
+      const avgDays = days ? days.total / days.count : 0;
+      return { name, paid: d.paid, score: computeReliabilityScore(d.paid, d.total, avgDays) ?? 0 };
+    })
+    .sort((a, b) => b.score - a.score || b.paid - a.paid)[0];
 
   // Most reminders — summed reminder_count per person.
   const reminders: Record<string, number> = {};
@@ -228,6 +313,7 @@ export function getSplitBillStats(userId: string, year: number, month: number) {
     biggestDebtor: biggestDebtorEntry ? { name: biggestDebtorEntry[0], amount: biggestDebtorEntry[1], settled: !hasPending } : null,
     slowestPayer: slowest ? { name: slowest.name, avgDays: slowest.avgDays } : null,
     mostReminders: mostReminders ? { name: mostReminders[0], totalReminders: mostReminders[1] } : null,
+    mostReliable: mostReliableEntry ? { name: mostReliableEntry.name, score: mostReliableEntry.score } : null,
     totalSplitBills: inMonth.length,
   };
 }

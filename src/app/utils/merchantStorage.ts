@@ -18,7 +18,7 @@ export interface Merchant {
    * longer swallow every "Kopitiam Food Court" payment.
    */
   aliases: string[];
-  /** False once deactivated: hidden from scanning, but still used to price historical XP. */
+  /** False once hidden: kept out of the scan list, still used to price history. */
   active: boolean;
 }
 
@@ -33,7 +33,13 @@ const DEFAULT_MERCHANTS: MerchantSeed[] = [
   { id: 'bev-eat', name: 'BEV EAT PTE',    amount: 12.50, reference: 'Table 5', xpRate: 10, xpBonus: 1 },
   { id: 'grocer',  name: 'FairPrice',      amount: 23.90, xpRate: 10, xpBonus: 1, aliases: ['FairPrice Xtra'] },
   { id: 'bubble',  name: 'Bubble Tea Bar', amount: 6.40,  reference: 'Brown sugar, less ice', xpRate: 10, xpBonus: 1 },
+  { id: 'uniqlo',  name: 'Uniqlo',         amount: 39.90, reference: 'AIRism Tee', xpRate: 10, xpBonus: 1 },
+  { id: 'zara',    name: 'ZARA',           amount: 79.90, reference: 'Order #ZR-2261', xpRate: 10, xpBonus: 1 },
 ];
+
+// IDs of the fashion (Shopping) merchants added after the first release. Used to
+// back-fill them into databases that were seeded before they existed.
+const FASHION_MERCHANT_IDS = ['uniqlo', 'zara'];
 
 function notifyUpdated(): void {
   window.dispatchEvent(new CustomEvent('merchantsUpdated'));
@@ -49,7 +55,7 @@ function rowToMerchant(r: Record<string, any>): Merchant {
     xpBonus: r.xp_bonus == null ? DEFAULT_XP_BONUS : Number(r.xp_bonus),
     campaignStart: r.campaign_start == null ? null : Number(r.campaign_start),
     campaignEnd: r.campaign_end == null ? null : Number(r.campaign_end),
-    aliases: r.aliases ? String(r.aliases).split('|').map(a => a.trim()).filter(Boolean) : [],
+    aliases: r.aliases ? String(r.aliases).split('|').map((a: string) => a.trim()).filter(Boolean) : [],
     active: r.active == null ? true : Number(r.active) === 1,
   };
 }
@@ -70,38 +76,68 @@ export function seedMerchantsIfEmpty(): void {
   notifyUpdated();
 }
 
+// Back-fills the fashion merchants into databases that were seeded before they
+// were added. Runs at most once (guarded by an app_meta flag) so a merchant the
+// user later deletes does not reappear on the next launch.
+export function ensureFashionMerchants(): void {
+  const seen = query("SELECT value FROM app_meta WHERE key = 'seeded-fashion-merchants'");
+  if (seen.length > 0) return;
+  for (const m of DEFAULT_MERCHANTS.filter(x => FASHION_MERCHANT_IDS.includes(x.id))) {
+    run(
+      `INSERT OR IGNORE INTO merchants (id, name, amount, reference, active, xp_rate, xp_bonus, aliases)
+       VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+      [m.id, m.name, m.amount, m.reference ?? null, m.xpRate, m.xpBonus,
+        (m.aliases ?? []).join('|') || null]
+    );
+  }
+  run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('seeded-fashion-merchants', 'true')");
+  notifyUpdated();
+}
+
 export function getMerchants(): Merchant[] {
   seedMerchantsIfEmpty();
   return query('SELECT * FROM merchants WHERE active = 1 ORDER BY name').map(rowToMerchant);
 }
 
-/** Includes deactivated merchants, so historical XP keeps pricing correctly. */
+/** Includes hidden merchants, so historical XP keeps pricing correctly. */
 export function getAllMerchants(): Merchant[] {
   seedMerchantsIfEmpty();
   return query('SELECT * FROM merchants ORDER BY name').map(rowToMerchant);
 }
 
 /**
- * Matches a transaction's merchant name back to a configured merchant.
+ * Whether a transaction's free-text merchant name refers to this merchant.
  *
  * Matching is exact against the merchant name or one of its declared aliases.
- * The previous substring match meant any merchant whose name was a substring of
- * the transaction name would claim it - a merchant called "Kopi" captured every
- * "Kopitiam Food Court" payment and applied the wrong rate.
+ * A substring match meant any merchant whose name was contained in the
+ * transaction name would claim it - a merchant called "Kopi" captured every
+ * "Kopitiam Food Court" payment and applied the wrong rate. Transaction names
+ * really are free-form, so the answer is to declare the variants explicitly
+ * rather than to guess.
  *
- * Deactivated merchants are still matched: a payment made while a stall was
- * live should keep the XP it earned, and hiding the stall from the scan list
- * must not silently reprice history.
+ * This is the single rule used both to price XP and to attribute a sale in the
+ * merchant portal, so a sale that earns XP is always the same sale a merchant
+ * sees in their insights.
+ */
+export function matchesMerchant(transactionName: string, merchant: Pick<Merchant, 'name' | 'aliases'>): boolean {
+  const needle = transactionName.trim().toLowerCase();
+  if (!needle) return false;
+  if (merchant.name.trim().toLowerCase() === needle) return true;
+  return merchant.aliases.some(alias => alias.trim().toLowerCase() === needle);
+}
+
+/**
+ * Matches a transaction's merchant name back to a configured merchant so its XP
+ * settings can be applied.
+ *
+ * Hidden merchants are still matched: a payment made while a stall was live
+ * should keep the XP it earned, and hiding the stall must not reprice history.
  */
 export function getMerchantByName(name: string): Merchant | null {
-  const needle = name.trim().toLowerCase();
-  if (!needle) return null;
-  const matches = (m: Merchant) =>
-    m.name.trim().toLowerCase() === needle ||
-    m.aliases.some(alias => alias.trim().toLowerCase() === needle);
-  // Prefer a live merchant when an alias is shared with a retired one.
   const all = getAllMerchants();
-  return all.find(m => m.active && matches(m)) ?? all.find(matches) ?? null;
+  return all.find(m => m.active && matchesMerchant(name, m))
+    ?? all.find(m => matchesMerchant(name, m))
+    ?? null;
 }
 
 /** True when the merchant's bonus multiplier applies at `at`. */
@@ -140,15 +176,16 @@ export function saveMerchant(merchant: Omit<Merchant, 'active'>): void {
 }
 
 /**
- * Hides a merchant from the scan list. The row is kept so historical
- * transactions keep pricing against the rate that was live when they happened.
+ * Soft delete. The row is kept and only hidden from the scan list, because a
+ * hard delete silently reprices every past payment at that merchant back to the
+ * default rate - the XP a customer already earned would change retroactively.
  */
-export function deactivateMerchant(id: string): void {
+export function deleteMerchant(id: string): void {
   run('UPDATE merchants SET active = 0 WHERE id = ?', [id]);
   notifyUpdated();
 }
 
-export function reactivateMerchant(id: string): void {
+export function restoreMerchant(id: string): void {
   run('UPDATE merchants SET active = 1 WHERE id = ?', [id]);
   notifyUpdated();
 }

@@ -19,6 +19,7 @@ export interface Reminder {
   reminderCount?: number;
   createdDate?: string;
   paidDate?: string;
+  thankYou?: string;
 }
 
 function rowToReminder(r: Record<string, any>): Reminder {
@@ -41,6 +42,7 @@ function rowToReminder(r: Record<string, any>): Reminder {
     reminderCount: r.reminder_count ?? 0,
     createdDate: r.created_date ?? undefined,
     paidDate: r.paid_date ?? undefined,
+    thankYou: r.thank_you ?? undefined,
   };
 }
 
@@ -97,15 +99,16 @@ export function clearAllReminders(): void {
   notifyUpdated();
 }
 
-export function markReminderAsPaid(id: number): Reminder | null {
+export function markReminderAsPaid(id: number, thankYou?: string): Reminder | null {
   const rows = query('SELECT * FROM reminders WHERE id = ?', [id]);
   if (!rows.length) return null;
   const reminder = rowToReminder(rows[0]);
 
-  run('UPDATE reminders SET status = ?, paid_date = ? WHERE id = ?',
-    ['paid', new Date().toISOString(), id]);
+  const note = thankYou?.trim() || null;
+  run('UPDATE reminders SET status = ?, paid_date = ?, thank_you = ? WHERE id = ?',
+    ['paid', new Date().toISOString(), note, id]);
   notifyUpdated();
-  return reminder;
+  return { ...reminder, status: 'paid', thankYou: note ?? undefined };
 }
 
 export function incrementReminderCount(id: number): void {
@@ -125,6 +128,24 @@ export interface PersonInsight {
   averagePaymentTime: number;
   fastestPayment: number;
   slowestPayment: number;
+  /** 0-100, or null when there's no reminder history yet to score. */
+  reliabilityScore: number | null;
+}
+
+// How trustworthy a person is to pay you back: rewards a high share of paid
+// reminders, then docks points the slower they tend to pay (capped at -30 so
+// one slow payment doesn't wipe out an otherwise-reliable history).
+export function computeReliabilityScore(
+  paidReminders: number,
+  totalReminders: number,
+  averagePaymentTime: number
+): number | null {
+  if (totalReminders <= 0) return null;
+  const completionRate = paidReminders / totalReminders;
+  const latePenalty = paidReminders > 0 && averagePaymentTime > 3
+    ? Math.min(30, (averagePaymentTime - 3) * 5)
+    : 0;
+  return Math.max(0, Math.min(100, Math.round(completionRate * 100 - latePenalty)));
 }
 
 export function getUserInsights(currentUserId: string): PersonInsight[] {
@@ -150,16 +171,68 @@ export function getUserInsights(currentUserId: string): PersonInsight[] {
     [currentUserId]
   );
 
-  return rows.map(r => ({
-    userId: String(r.userId),
-    userName: r.userName as string,
-    avatar: r.avatar as string,
-    totalReminders: Number(r.totalReminders),
-    paidReminders: Number(r.paidReminders),
-    pendingReminders: Number(r.pendingReminders),
-    averageReminderCount: parseFloat((Number(r.averageReminderCount) || 0).toFixed(1)),
-    averagePaymentTime: parseFloat((Number(r.averagePaymentTime) || 0).toFixed(2)),
-    fastestPayment: parseFloat((Number(r.fastestPayment) || 0).toFixed(2)),
-    slowestPayment: parseFloat((Number(r.slowestPayment) || 0).toFixed(2)),
-  }));
+  const insights = rows.map(r => {
+    const paidReminders = Number(r.paidReminders);
+    const totalReminders = Number(r.totalReminders);
+    const averagePaymentTime = parseFloat((Number(r.averagePaymentTime) || 0).toFixed(2));
+    return {
+      userId: String(r.userId),
+      userName: r.userName as string,
+      avatar: r.avatar as string,
+      totalReminders,
+      paidReminders,
+      pendingReminders: Number(r.pendingReminders),
+      averageReminderCount: parseFloat((Number(r.averageReminderCount) || 0).toFixed(1)),
+      averagePaymentTime,
+      fastestPayment: parseFloat((Number(r.fastestPayment) || 0).toFixed(2)),
+      slowestPayment: parseFloat((Number(r.slowestPayment) || 0).toFixed(2)),
+      reliabilityScore: computeReliabilityScore(paidReminders, totalReminders, averagePaymentTime),
+    };
+  });
+
+  // Materialise the result into the insights table so it can be viewed in the
+  // database. Recomputed from live reminders each time, so it's never stale or
+  // hard-coded: replace this owner's rows with the current ones.
+  run('DELETE FROM insights WHERE owner_user_id = ?', [currentUserId]);
+  const now = Date.now();
+  for (const item of insights) {
+    run(
+      `INSERT OR REPLACE INTO insights
+         (owner_user_id, person_user_id, person_name, avatar, total_reminders, paid_reminders,
+          pending_reminders, average_reminder_count, average_payment_time, fastest_payment,
+          slowest_payment, reliability_score, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        currentUserId, item.userId, item.userName, item.avatar, item.totalReminders,
+        item.paidReminders, item.pendingReminders, item.averageReminderCount,
+        item.averagePaymentTime, item.fastestPayment, item.slowestPayment,
+        item.reliabilityScore, now,
+      ],
+    );
+  }
+
+  return insights;
+}
+
+// Seeds ONE already-paid shared bill (Alex paid, Sarah repaid) so the demo has
+// history: Sarah then shows "Usually pays in ~2 days" next to her name in the
+// To-Receive tab when you create a new split with her. Runs once, guarded by an
+// app_meta flag. Alex = id '1' (current user), Sarah = id '2'.
+export function seedDemoHistoryIfEmpty(): void {
+  const seen = query("SELECT value FROM app_meta WHERE key = 'seeded-demo-history'");
+  if (seen.length > 0) return;
+
+  const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); };
+
+  addReminders([
+    {
+      fromUserId: '1', toUserId: '2', fromUserName: 'Alex Chen', toUserName: 'Sarah Tan',
+      name: 'Sarah Tan', amount: 18.00, status: 'paid', date: daysAgo(12), category: 'Dinner at Marina Bay',
+      avatar: '👩', reminderSent: true, lastReminderDate: daysAgo(12),
+      totalBillAmount: 36.00, payerShare: 18.00, reminderCount: 1,
+      createdDate: daysAgo(12), paidDate: daysAgo(10), thankYou: '🙏 Thanks for covering!',
+    },
+  ]);
+
+  run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('seeded-demo-history', 'true')");
 }

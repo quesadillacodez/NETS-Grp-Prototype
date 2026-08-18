@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolvePaymentCategory, splitAmountExactly } from './paymentFlow';
-import { inferTransactionKind, resolveSpendCategory } from './spendingInsights';
+import { resolveSpendCategory } from './spendingInsights';
+import { classifyTransaction, countsAsSpending } from './transactionModel';
 import {
   getLeadingActivityIds, hasEveryoneVoted, validateBudget,
   type Activity, type Hangout, type HangoutVote,
@@ -32,12 +33,37 @@ describe('splitAmountExactly', () => {
   });
 });
 
-describe('inferTransactionKind', () => {
+describe('classifyTransaction', () => {
   it('keeps wallet flows separate from purchases', () => {
-    expect(inferTransactionKind({ name: 'Top-up via PayNow', amount: 50, category: 'topup' })).toBe('topup');
-    expect(inferTransactionKind({ name: 'NETS XP Cashback', amount: 5, category: 'reward' })).toBe('cashback');
-    expect(inferTransactionKind({ name: 'Sarah Tan', amount: 20, status: 'received' })).toBe('transfer');
-    expect(inferTransactionKind({ name: 'Kopitiam', amount: -8.5, category: 'payment' })).toBe('purchase');
+    expect(classifyTransaction({ name: 'Top-up via PayNow', amount: 50, category: 'topup' })).toBe('topup');
+    expect(classifyTransaction({ name: 'NETS XP Cashback', amount: 5, category: 'reward' })).toBe('cashback');
+    expect(classifyTransaction({ name: 'Kopitiam', amount: -8.5, category: 'payment' })).toBe('purchase');
+  });
+
+  it('separates the two sides of a repayment', () => {
+    expect(classifyTransaction({ name: 'Sarah Tan', amount: 20, status: 'received' })).toBe('repayment_received');
+    expect(classifyTransaction({ name: 'Dinner (split with Alex)', amount: -20, status: 'sent' })).toBe('repayment_sent');
+  });
+
+  it('reclassifies legacy rows that stored repayments as transfers', () => {
+    expect(classifyTransaction({ name: 'Alex Chen', amount: 18, kind: 'transfer', status: 'received' }))
+      .toBe('repayment_received');
+    expect(classifyTransaction({ name: 'Lunch (split with Alex)', amount: -18, kind: 'transfer', status: 'sent' }))
+      .toBe('repayment_sent');
+  });
+
+  it('never labels a top-up or cashback as a repayment', () => {
+    expect(classifyTransaction({ name: 'Top-up via DBS/POSB', amount: 50, kind: 'income', status: 'received' }))
+      .toBe('topup');
+    expect(classifyTransaction({ name: 'NETS XP Cashback', amount: 5, category: 'reward', status: 'received' }))
+      .toBe('cashback');
+  });
+
+  it('counts only money the user actually spent', () => {
+    expect(countsAsSpending({ name: 'Kopitiam', amount: -8.5, kind: 'purchase' })).toBe(true);
+    expect(countsAsSpending({ name: 'Lunch (split with Alex)', amount: -18, kind: 'repayment_sent' })).toBe(true);
+    expect(countsAsSpending({ name: 'Top-up via PayNow', amount: 50, kind: 'topup' })).toBe(false);
+    expect(countsAsSpending({ name: 'Sarah Tan', amount: 20, kind: 'repayment_received' })).toBe(false);
   });
 });
 

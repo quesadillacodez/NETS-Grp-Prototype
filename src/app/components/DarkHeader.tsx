@@ -15,12 +15,13 @@ export function DarkHeader({ title, onBack, bottomGap = 'mb-8', padding = 'pt-14
       <div className={`flex items-center justify-between ${bottomGap}`}>
         <button
           onClick={onBack}
-          className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
+          aria-label={`Back from ${title}`}
+          className="w-11 h-11 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0"
         >
-          <ChevronLeft className="w-6 h-6 text-white" />
+          <ChevronLeft className="w-6 h-6 text-white" aria-hidden="true" />
         </button>
-        <h1 className="text-white font-semibold text-lg">{title}</h1>
-        <div className="w-10" />
+        <h1 className="text-white font-semibold text-lg text-center px-2">{title}</h1>
+        <div className="w-11 flex-shrink-0" />
       </div>
       {children}
     </div>

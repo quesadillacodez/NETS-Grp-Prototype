@@ -17,29 +17,39 @@ export function ScheduleReminderPage() {
   const currentTime = now.toTimeString().slice(0, 5);
 
   const [pendingReminders] = useState(() => getRemindersToReceive(currentUser.id).filter((r) => r.status !== 'paid'));
-  const [selectedContact, setSelectedContact] = useState(preselectedContact?.name || '');
+
+  // Resolve the preselected reminder to its unique id. Selecting by id (not by
+  // name) matters because the same person can owe for two different things —
+  // e.g. two "Sarah Tan" reminders for different amounts must stay separate.
+  const resolvePreselectedId = (): number | null => {
+    const c = preselectedContact;
+    if (!c) return null;
+    if (typeof c === 'object' && c.id != null) {
+      return pendingReminders.some((r) => r.id === c.id) ? c.id : null;
+    }
+    const name = typeof c === 'string' ? c : c.name;
+    return pendingReminders.find((r) => r.toUserName === name)?.id ?? null;
+  };
+
+  const [selectedId, setSelectedId] = useState<number | null>(resolvePreselectedId());
   const [sendOption, setSendOption] = useState<'now' | 'later'>('now');
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedTime, setSelectedTime] = useState(currentTime);
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    if (preselectedContact) setSelectedContact(preselectedContact.name);
-  }, [preselectedContact]);
+  const selectedReminder = pendingReminders.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
-    const contactData = pendingReminders.find((r) => r.toUserName === selectedContact);
-    if (contactData) {
-      setMessage(`Hey ${contactData.toUserName}, reminder about the $${contactData.amount.toFixed(2)} payment for ${contactData.category}. Thanks!`);
-    } else if (selectedContact) {
-      setMessage(`Hey ${selectedContact}, reminder about your payment. Thanks!`);
+    if (selectedReminder) {
+      setMessage(`Hey ${selectedReminder.toUserName}, reminder about the $${selectedReminder.amount.toFixed(2)} payment for ${selectedReminder.category}. Thanks!`);
     } else {
       setMessage("Hey, did you forget to pay for dinner last night?");
     }
-  }, [selectedContact, pendingReminders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, pendingReminders]);
 
   const handleSend = () => {
-    const contactData = pendingReminders.find((r) => r.toUserName === selectedContact);
+    const contactData = selectedReminder;
     const actualDate = sendOption === 'now' ? today : selectedDate;
     const actualTime = sendOption === 'now' ? currentTime : selectedTime;
 
@@ -62,14 +72,16 @@ export function ScheduleReminderPage() {
           timestamp: new Date().toISOString(),
           read: false,
           reminderId: contactData.id,
+          channel: 'reminders',
+          link: '/reminders',
         });
       }
     }
 
-    navigate('/reminder-tracking', { state: { contact: selectedContact, contactData, date: actualDate, time: actualTime, message, sendOption } });
+    navigate('/reminder-tracking', { state: { contact: selectedReminder?.toUserName ?? '', contactData, date: actualDate, time: actualTime, message, sendOption } });
   };
 
-  const canSend = !!selectedContact && !!message;
+  const canSend = !!selectedReminder && !!message;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -107,9 +119,9 @@ export function ScheduleReminderPage() {
               {pendingReminders.map((r) => (
                 <button
                   key={r.id}
-                  onClick={() => setSelectedContact(r.toUserName)}
+                  onClick={() => setSelectedId(r.id)}
                   className={`p-4 rounded-2xl border-2 transition-all ${
-                    selectedContact === r.toUserName
+                    selectedId === r.id
                       ? 'bg-gradient-to-r from-primary/10 to-accent/10 border-primary'
                       : 'bg-secondary border-border'
                   }`}

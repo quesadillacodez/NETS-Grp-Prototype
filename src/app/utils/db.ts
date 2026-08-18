@@ -1,11 +1,16 @@
 import initSqlJs, { type Database, type SqlValue } from 'sql.js';
+import { classifyTransaction } from './transactionModel';
 
 const IDB_NAME = 'nets-db';
 const IDB_STORE = 'sqlite';
 const IDB_KEY = 'database';
 
 let db: Database | null = null;
+let sqlModule: Awaited<ReturnType<typeof initSqlJs>> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudSyncInFlight = false;
+const CLOUD_REVISION_KEY = 'nets-cloud-database-revision';
 
 function openIndexedDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -41,10 +46,15 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
   id                        TEXT PRIMARY KEY,
+  login_id                  TEXT,
   name                      TEXT NOT NULL,
   avatar                    TEXT NOT NULL,
   phone                     TEXT NOT NULL,
+  email                     TEXT,
+  password                  TEXT,
   is_admin                  INTEGER DEFAULT 0,
+  role                      TEXT DEFAULT 'customer',
+  merchant_id               TEXT,
   reminder_frequency        TEXT DEFAULT 'daily',
   auto_reminders_enabled    INTEGER DEFAULT 1,
   last_auto_reminder_sent   TEXT,
@@ -86,6 +96,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   reminder_count     INTEGER DEFAULT 0,
   created_date       TEXT,
   paid_date          TEXT,
+  thank_you          TEXT,
   FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (to_user_id)   REFERENCES users(id) ON DELETE CASCADE
 );
@@ -104,9 +115,123 @@ CREATE TABLE IF NOT EXISTS notifications (
   timestamp        TEXT NOT NULL,
   read             INTEGER DEFAULT 0,
   reminder_id      INTEGER,
+  channel          TEXT,
+  link             TEXT,
+  -- Set once the push banner for this notification has been dismissed with its
+  -- (x) button, so it never pops back up on another page or app reopen. Distinct
+  -- from read: dismissing the banner does not clear it from the Notification
+  -- Centre.
+  banner_dismissed INTEGER DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+
+-- Per-channel push preferences. A notification is always recorded in the
+-- Notification Centre; this only controls whether the user is interrupted.
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id      TEXT NOT NULL,
+  channel      TEXT NOT NULL,
+  push_enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at   INTEGER,
+  PRIMARY KEY (user_id, channel),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS payment_methods (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  label      TEXT NOT NULL,
+  detail     TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_payment_methods_user ON payment_methods(user_id);
+
+-- The NETS cards shown in the Home carousel. The vCashCard is the wallet
+-- itself, so its balance column is unused and ignored on read — the wallet
+-- balance has exactly one definition, the sum over the transactions table. The
+-- stored balance is only meaningful for the cards that really do hold their own
+-- float (the prepaid card and the motoring CashCard).
+CREATE TABLE IF NOT EXISTS cards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  last_four  TEXT NOT NULL,
+  balance    REAL NOT NULL DEFAULT 0,
+  frozen     INTEGER NOT NULL DEFAULT 0,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cards_user ON cards(user_id);
+
+-- Per-account app preferences that are not settings screens of their own —
+-- currently only the customer's chosen Quick Actions. Kept in the database
+-- because they belong to the account; the demo location is deliberately not
+-- here, being a property of the device rather than the customer.
+-- What a merchant sells. A menu turns "$6.80 at Kopitiam" into "one Nasi
+-- Lemak", which is what makes a stallholder's dashboard worth opening.
+CREATE TABLE IF NOT EXISTS merchant_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  price       REAL NOT NULL,
+  category    TEXT,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_items ON merchant_items(merchant_id);
+
+-- One line of a sale. The item's name and price are copied in rather than
+-- joined, so renaming a menu item or changing its price never rewrites the
+-- history of what was actually sold for how much.
+--
+-- Keyed by the payment id the QR flow already generates: the unique index makes
+-- recording a sale idempotent, the same guard that stops a duplicate payment
+-- being written twice.
+CREATE TABLE IF NOT EXISTS item_sales (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id  TEXT NOT NULL,
+  merchant_id TEXT NOT NULL,
+  item_id     INTEGER NOT NULL,
+  name        TEXT NOT NULL,
+  unit_price  REAL NOT NULL,
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  user_id     TEXT,
+  created_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_item_sales_payment ON item_sales(payment_id, item_id);
+CREATE INDEX IF NOT EXISTS idx_item_sales_merchant ON item_sales(merchant_id, created_at);
+
+-- Paid placement in the rewards store. A merchant books a slot for a window at
+-- a weekly rate; the fee owed and the redemptions it drove are both derived
+-- from this row rather than stored, so a report can never disagree with the
+-- booking or with the redemption ledger.
+CREATE TABLE IF NOT EXISTS reward_promotions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_id   INTEGER NOT NULL,
+  title       TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  placement   TEXT NOT NULL DEFAULT 'featured',
+  weekly_fee  REAL NOT NULL DEFAULT 0,
+  starts_at   INTEGER NOT NULL,
+  ends_at     INTEGER NOT NULL,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_promotions_window ON reward_promotions(starts_at, ends_at);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value      TEXT,
+  updated_at INTEGER,
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS merchants (
   id             TEXT PRIMARY KEY,
@@ -125,9 +250,10 @@ CREATE TABLE IF NOT EXISTS daily_logins (
   user_id TEXT NOT NULL,
   day     TEXT NOT NULL,
   at      INTEGER NOT NULL,
-  PRIMARY KEY (user_id, day),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  PRIMARY KEY (user_id, day)
 );
+
+-- Privacy-safe, merchant-scoped sales facts. Customer names and payment
 
 CREATE TABLE IF NOT EXISTS activities (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -245,6 +371,9 @@ CREATE TABLE IF NOT EXISTS reward_redemptions (
   ref_code    TEXT NOT NULL,
   redeemed_at INTEGER NOT NULL,
   used        INTEGER NOT NULL DEFAULT 0,
+  -- Epoch ms the voucher lapses; 0 means it never expires (instant cashback).
+  expires_at  INTEGER NOT NULL DEFAULT 0,
+  used_at     INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_reward_redemptions_user
@@ -254,12 +383,65 @@ CREATE TABLE IF NOT EXISTS processed_payments (
   payment_id   TEXT PRIMARY KEY,
   processed_at INTEGER NOT NULL
 );
+
+-- A per-user view of the Reminder Settings screen. Mirrors the settings columns
+-- on the users table so they're easy to see as their own table. Kept in sync:
+-- written on save and backfilled at startup.
+CREATE TABLE IF NOT EXISTS reminder_settings (
+  user_id                 TEXT PRIMARY KEY,
+  reminder_frequency      TEXT,
+  auto_reminders_enabled  INTEGER,
+  custom_reminder_hours   INTEGER,
+  custom_reminder_minutes INTEGER,
+  updated_at              INTEGER,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- A materialised copy of the Insights screen (who owes whom, how reliably they
+-- pay). Recomputed from the reminders table whenever Insights is viewed, so it
+-- always reflects the current data rather than being hard-coded.
+CREATE TABLE IF NOT EXISTS insights (
+  owner_user_id          TEXT NOT NULL,
+  person_user_id         TEXT NOT NULL,
+  person_name            TEXT,
+  avatar                 TEXT,
+  total_reminders        INTEGER,
+  paid_reminders         INTEGER,
+  pending_reminders      INTEGER,
+  average_reminder_count REAL,
+  average_payment_time   REAL,
+  fastest_payment        REAL,
+  slowest_payment        REAL,
+  reliability_score      REAL,
+  updated_at             INTEGER,
+  PRIMARY KEY (owner_user_id, person_user_id)
+);
+
+-- Saved "group templates" (e.g. "Secondary School Friends") so a bill split can
+-- select everyone in one tap instead of picking contacts one by one.
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_user_id TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contact_groups_owner ON contact_groups(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS contact_group_members (
+  group_id INTEGER NOT NULL,
+  user_id  TEXT NOT NULL,
+  PRIMARY KEY (group_id, user_id),
+  FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
+);
 `;
 
 export async function initDatabase(): Promise<void> {
   if (db) return;
 
   const SQL = await initSqlJs({ locateFile: () => '/sql-wasm.wasm' });
+  sqlModule = SQL;
 
   const bytes = await loadBytes();
   db = bytes ? new SQL.Database(bytes) : new SQL.Database();
@@ -283,6 +465,17 @@ export async function initDatabase(): Promise<void> {
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
     if (!names.includes('is_admin')) {
       db.run('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
+    }
+    if (!names.includes('role')) {
+      db.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'customer'");
+      db.run("UPDATE users SET role = 'admin' WHERE is_admin = 1");
+    }
+    // A merchant account is a user tied to one merchant. Null for customers and
+    // for the management account, which is what makes the role unambiguous —
+    // `role` names it, `merchant_id` says which stall.
+    if (!names.includes('merchant_id')) {
+      db.run('ALTER TABLE users ADD COLUMN merchant_id TEXT');
+      db.run("UPDATE users SET role = 'merchant' WHERE COALESCE(merchant_id,'') != ''");
     }
   } catch (e) {
     console.warn('users.is_admin migration skipped:', e);
@@ -320,6 +513,62 @@ export async function initDatabase(): Promise<void> {
     console.warn('transactions.created_at migration skipped:', e);
   }
 
+  // Reward redemptions gained an expiry and a "used at" timestamp when voucher
+  // status was added. Existing vouchers get 30 days from their redemption date,
+  // matching the default validity of the catalogue they came from.
+  try {
+    const cols = db.exec('PRAGMA table_info(reward_redemptions)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('expires_at')) {
+      db.run('ALTER TABLE reward_redemptions ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0');
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      db.run(
+        `UPDATE reward_redemptions SET expires_at = redeemed_at + ?
+          WHERE expires_at = 0 AND NOT (merchant = 'NETS Wallet' AND title LIKE '%Cashback%')`,
+        [thirtyDays],
+      );
+    }
+    if (!names.includes('used_at')) {
+      db.run('ALTER TABLE reward_redemptions ADD COLUMN used_at INTEGER');
+    }
+  } catch (e) {
+    console.warn('reward_redemptions expiry migration skipped:', e);
+  }
+
+  // Notifications gained a channel (payments / reminders / rewards / hangouts)
+  // and a deep link when the Notification Centre was added. Existing rows are
+  // left NULL and classified on read by `inferNotificationChannel`.
+  try {
+    const cols = db.exec('PRAGMA table_info(notifications)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('channel')) db.run('ALTER TABLE notifications ADD COLUMN channel TEXT');
+    if (!names.includes('link')) db.run('ALTER TABLE notifications ADD COLUMN link TEXT');
+    if (!names.includes('banner_dismissed')) db.run('ALTER TABLE notifications ADD COLUMN banner_dismissed INTEGER DEFAULT 0');
+  } catch (e) {
+    console.warn('notifications channel migration skipped:', e);
+  }
+
+  // Normalise every transaction onto the canonical model. Databases created by
+  // earlier builds stored repayments as `transfer`, cashback under category
+  // `reward` and left `kind` NULL on seeded rows, which is why the same row
+  // could read as "Top-up" in one screen and "Paid you back" in another.
+  try {
+    const res = db.exec('SELECT id, name, amount, category, status, kind FROM transactions');
+    if (res.length) {
+      const columns = res[0].columns;
+      for (const values of res[0].values) {
+        const row: Record<string, SqlValue> = {};
+        columns.forEach((column, index) => { row[column] = values[index]; });
+        const type = classifyTransaction(row);
+        if (row.kind !== type) {
+          db.run('UPDATE transactions SET kind = ? WHERE id = ?', [type, row.id as SqlValue]);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('transaction kind normalisation skipped:', e);
+  }
+
   try {
     const cols = db.exec('PRAGMA table_info(merchants)');
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
@@ -337,8 +586,8 @@ export async function initDatabase(): Promise<void> {
     }
     if (!names.includes('aliases')) {
       db.run('ALTER TABLE merchants ADD COLUMN aliases TEXT');
-      // Seed the aliases that the old substring matching used to cover, so XP
-      // on existing transactions does not change under the stricter matching.
+      // Seed the aliases the old substring matching used to cover, so XP on
+      // existing transactions does not change under the stricter matching.
       db.run("UPDATE merchants SET aliases = 'Kopitiam Food Court' WHERE id = 'kopi'");
       db.run("UPDATE merchants SET aliases = 'FairPrice Xtra' WHERE id = 'grocer'");
     }
@@ -356,6 +605,44 @@ export async function initDatabase(): Promise<void> {
   } catch (e) {
     console.warn('daily_logins migration skipped:', e);
   }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(reminders)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('thank_you')) {
+      db.run('ALTER TABLE reminders ADD COLUMN thank_you TEXT');
+    }
+  } catch (e) {
+    console.warn('reminders.thank_you migration skipped:', e);
+  }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(insights)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('reliability_score')) {
+      db.run('ALTER TABLE insights ADD COLUMN reliability_score REAL');
+    }
+  } catch (e) {
+    console.warn('insights.reliability_score migration skipped:', e);
+  }
+
+  try {
+    const cols = db.exec('PRAGMA table_info(users)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (!names.includes('login_id')) {
+      db.run('ALTER TABLE users ADD COLUMN login_id TEXT');
+    }
+    if (!names.includes('password')) {
+      db.run('ALTER TABLE users ADD COLUMN password TEXT');
+    }
+    if (!names.includes('email')) {
+      db.run('ALTER TABLE users ADD COLUMN email TEXT');
+    }
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id
+      ON users(login_id) WHERE login_id IS NOT NULL`);
+  } catch (e) {
+    console.warn('users login migration skipped:', e);
+  }
 }
 
 function scheduleSave(): void {
@@ -363,6 +650,8 @@ function scheduleSave(): void {
   saveTimer = setTimeout(() => {
     if (!db) return;
     saveBytes(db.export()).catch(err => console.error('DB save failed:', err));
+    void syncDatabaseToDisk();
+    scheduleCloudSync();
   }, 150);
 }
 
@@ -373,6 +662,97 @@ export async function flushSave(): Promise<void> {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   if (!db) return;
   await saveBytes(db.export());
+  void syncDatabaseToDisk();
+  await syncDatabaseToServer();
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function scheduleCloudSync(): void {
+  if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
+  if (!localStorage.getItem('nets-session-user-id')) return;
+  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => { void syncDatabaseToServer(); }, 800);
+}
+
+function scrubClientCredentials(): void {
+  if (!db) return;
+  db.run('UPDATE users SET password = NULL WHERE password IS NOT NULL');
+}
+
+async function importCloudDatabase(sqlite: string, revision: number): Promise<void> {
+  if (!sqlModule) throw new Error('SQL engine is not ready.');
+  const candidate = new sqlModule.Database(base64ToBytes(sqlite));
+  const check = candidate.exec('PRAGMA quick_check');
+  if (!check.length || String(check[0].values[0]?.[0]) !== 'ok') {
+    candidate.close();
+    throw new Error('The synchronized database failed its integrity check.');
+  }
+  candidate.run(SCHEMA);
+  const userColumns = candidate.exec('PRAGMA table_info(users)');
+  const userColumnNames = userColumns.length ? userColumns[0].values.map(value => String(value[1])) : [];
+  if (!userColumnNames.includes('role')) {
+    candidate.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'customer'");
+    candidate.run("UPDATE users SET role = 'admin' WHERE is_admin = 1");
+  }
+  if (!userColumnNames.includes('merchant_id')) candidate.run('ALTER TABLE users ADD COLUMN merchant_id TEXT');
+  candidate.run('UPDATE users SET password = NULL WHERE password IS NOT NULL');
+  db?.close();
+  db = candidate;
+  localStorage.setItem(CLOUD_REVISION_KEY, String(revision));
+  await saveBytes(db.export());
+  window.dispatchEvent(new CustomEvent('databaseReady'));
+}
+
+async function syncDatabaseToServer(): Promise<void> {
+  if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
+  if (!db || cloudSyncInFlight || !localStorage.getItem('nets-session-user-id')) return;
+  cloudSyncInFlight = true;
+  try {
+    scrubClientCredentials();
+    const revision = Number(localStorage.getItem(CLOUD_REVISION_KEY) || 0);
+    const response = await fetch('/api/sync/state', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-NETS-CSRF': '1' },
+      body: JSON.stringify({ revision, sqlite: bytesToBase64(db.export()) }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 409 && body.state?.sqlite) {
+      await importCloudDatabase(body.state.sqlite, Number(body.state.revision));
+      window.dispatchEvent(new CustomEvent('cloudSyncConflict'));
+      return;
+    }
+    if (response.ok) localStorage.setItem(CLOUD_REVISION_KEY, String(body.revision));
+  } catch (error) {
+    console.warn('Cloud database sync paused:', error);
+  } finally {
+    cloudSyncInFlight = false;
+  }
+}
+
+/** Hydrate from the newest server copy, or upload this device's first copy. */
+export async function synchronizeDatabaseWithServer(): Promise<void> {
+  if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
+  if (!db) return;
+  try {
+    const response = await fetch('/api/sync/state', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return;
+    const state = await response.json() as { revision: number; sqlite: string | null };
+    const localRevision = Number(localStorage.getItem(CLOUD_REVISION_KEY) || 0);
+    if (state.sqlite && state.revision > localRevision) {
+      await importCloudDatabase(state.sqlite, state.revision);
+      return;
+    }
+    if (!state.sqlite) await syncDatabaseToServer();
+  } catch (error) {
+    console.warn('Cloud database hydration unavailable:', error);
+  }
 }
 
 function requireDb(): Database {
@@ -414,10 +794,110 @@ export function lastInsertId(): number {
   return row ? Number(row.id) : 0;
 }
 
+// ── Live sync: mirror the real database to files on disk while `npm run dev` ──
+// runs (handled by the dev-server endpoint in vite.config.ts). Nothing here is
+// hard-coded: it exports whatever the app actually has right now, so anything
+// added/edited/deleted in the app is reflected in database/nets.sqlite (and the
+// readable per-table files). No-op outside dev or if the endpoint is absent.
+
+export function listTables(): string[] {
+  return query(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+     ORDER BY name`,
+  ).map(row => String(row.name));
+}
+
+function tableColumnNames(table: string): string[] {
+  if (!listTables().includes(table)) return [];
+  return query(`PRAGMA table_info(${table})`).map(row => String(row.name));
+}
+
+export interface ColumnInfo {
+  name: string;
+  type: string;
+  primaryKey: boolean;
+  notNull: boolean;
+}
+
+/**
+ * A table's columns as SQLite itself reports them.
+ *
+ * Table names cannot be bound as parameters in a PRAGMA, so the name is checked
+ * against the real table list first and anything else is refused rather than
+ * interpolated.
+ */
+export function describeTable(table: string): ColumnInfo[] {
+  if (!listTables().includes(table)) return [];
+  return query(`PRAGMA table_info(${table})`).map(row => ({
+    name: String(row.name),
+    type: String(row.type || 'TEXT'),
+    primaryKey: Number(row.pk) > 0,
+    notNull: Number(row.notnull) === 1,
+  }));
+}
+
+/** Row count for a table, without reading the rows themselves. */
+export function countRows(table: string): number {
+  if (!listTables().includes(table)) return 0;
+  const row = queryOne(`SELECT COUNT(*) AS n FROM ${table}`);
+  return Number(row?.n ?? 0);
+}
+
+/** A page of a table's rows, newest rowid first so recent activity leads. */
+export function readTable(table: string, limit: number, offset = 0): Row[] {
+  if (!listTables().includes(table)) return [];
+  return query(`SELECT * FROM ${table} ORDER BY rowid DESC LIMIT ? OFFSET ?`, [limit, offset]);
+}
+
+/** The live database as a real SQLite file, for download or inspection. */
+export function exportDatabaseBytes(): Uint8Array {
+  return requireDb().export();
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+let diskSyncInFlight = false;
+async function syncDatabaseToDisk(): Promise<void> {
+  const isDev = typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV;
+  if (!isDev || !db || typeof fetch === 'undefined' || diskSyncInFlight) return;
+  diskSyncInFlight = true;
+  try {
+    const snapshot = listTables().map(name => {
+      const columns = tableColumnNames(name);
+      const rows = query(`SELECT * FROM ${name}`).map(row => columns.map(col => row[col] ?? null));
+      return { name, columns, rows };
+    });
+    await fetch('/__db/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sqlite: bytesToBase64(db.export()), snapshot }),
+    });
+  } catch {
+    // dev convenience only — ignore (endpoint absent, offline, production build)
+  } finally {
+    diskSyncInFlight = false;
+  }
+}
+
+// Force an immediate write of the on-disk files (e.g. right after seeding).
+export function syncDatabaseFilesNow(): void {
+  void syncDatabaseToDisk();
+}
+
 export function resetDatabase(): void {
   const d = requireDb();
   d.run(`
     DELETE FROM notifications;
+    DELETE FROM notification_preferences;
+    DELETE FROM payment_methods;
     DELETE FROM reminders;
     DELETE FROM transactions;
     DELETE FROM redemptions;

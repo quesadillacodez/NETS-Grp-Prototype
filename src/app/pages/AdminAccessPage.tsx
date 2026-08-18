@@ -5,14 +5,15 @@ import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
 import {
   X, Shield, Users, TrendingUp, TrendingDown, DollarSign, UsersRound,
-  RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap,
-  CalendarDays, BarChart3,
+  RefreshCw, ArrowLeft, Lock, ChevronRight, ChevronLeft, Store, Plus, Pencil, Trash2, Vote, Zap, LogOut,
+  Database, CalendarDays, BarChart3,
 } from 'lucide-react';
 import { getCurrentUser, getAllUsers, isAdminUser } from '../utils/userStorage';
-import { getAllTransactions, type Transaction } from '../utils/transactionStorage';
+import { logout } from '../utils/authStorage';
+import { describeTransaction, getAllTransactions, walletBalanceFrom, type Transaction } from '../utils/transactionStorage';
 import { getRedemptions } from '../utils/redemptionStorage';
 import {
-  getMerchants, saveMerchant, deactivateMerchant,
+  getMerchants, saveMerchant, deleteMerchant,
   DEFAULT_XP_BONUS, DEFAULT_XP_RATE, type Merchant,
 } from '../utils/merchantStorage';
 import {
@@ -22,6 +23,7 @@ import {
 } from '../utils/hangoutStorage';
 import { getAdminStats, getUserActivity, type AdminStats, type UserActivity } from '../utils/adminStats';
 import { AccountSwitcher } from '../components/AccountSwitcher';
+import { AdminRewardsTab } from '../components/AdminRewardsTab';
 import { useAppEvents } from '../utils/useAppEvents';
 
 const ACTIVITY_CATEGORIES: ActivityCategory[] = ['food', 'attraction', 'creative', 'active'];
@@ -30,21 +32,18 @@ function fmtMoney(n: number): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// The portal reads its labels from the same shared model as the customer app,
+// so a repayment can never appear here as a "Top-up".
 function toAdminTxn(tx: Transaction, userName: string) {
-  const isTopup = tx.amount >= 0;
+  const described = describeTransaction(tx);
   return {
-    id: `TXN-${tx.id}`,
+    id: described.reference,
     user: userName,
-    type: /redeem/i.test(tx.name) ? 'Redemption' : isTopup ? 'Top-up' : 'Payment',
-    amount: `${isTopup ? '+' : '-'}$${Math.abs(tx.amount).toFixed(2)}`,
+    type: described.meta.label,
+    amount: described.signedAmount,
     time: tx.date,
-    isTopup,
+    isTopup: described.isIncoming,
   };
-}
-
-function makeMerchantId(name: string): string {
-  const base = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return `${base || 'merchant'}-${Date.now().toString(36)}`;
 }
 
 /** Timestamp -> `YYYY-MM-DD` for a date input. */
@@ -55,8 +54,8 @@ function toDateInput(timestamp: number | null): string {
 }
 
 /**
- * `YYYY-MM-DD` -> timestamp. The end of a campaign is inclusive, so it lands on
- * the last millisecond of the chosen day rather than midnight at its start.
+ * `YYYY-MM-DD` -> timestamp. A campaign's end is inclusive, so it lands on the
+ * last millisecond of the chosen day rather than midnight at its start.
  */
 function fromDateInput(value: string, edge: 'start' | 'end'): number | null {
   if (!value) return null;
@@ -65,6 +64,11 @@ function fromDateInput(value: string, edge: 'start' | 'end'): number | null {
   return edge === 'start'
     ? new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
     : new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+}
+
+function makeMerchantId(name: string): string {
+  const base = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${base || 'merchant'}-${Date.now().toString(36)}`;
 }
 
 // ─── Hangout activity editor ─────────────────────────────────────────────────
@@ -116,8 +120,8 @@ function ActivityModal({ onClose, onSave, editActivity }: {
       >
         <div className="flex items-center justify-between p-5 border-b border-border">
           <h2 className="font-bold text-lg text-foreground">{editActivity ? 'Edit Hangout Activity' : 'Add Hangout Activity'}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-            <X size={16} className="text-foreground" />
+          <button onClick={onClose} aria-label="Close activity editor" className="w-11 h-11 rounded-full bg-secondary flex items-center justify-center">
+            <X size={16} className="text-foreground" aria-hidden="true" />
           </button>
         </div>
         <div className="overflow-y-auto p-5 flex flex-col gap-3 pb-8">
@@ -163,10 +167,9 @@ function ActivityModal({ onClose, onSave, editActivity }: {
 
 // ─── User detail drill-down (light) ──────────────────────────────────────────
 function UserDetail({ user, onBack }: { user: UserActivity; onBack: () => void }) {
-  const BASE_BALANCE = 2500;
   const txns = getAllTransactions(user.id);
   const redemptions = getRedemptions(user.id);
-  const balance = BASE_BALANCE + txns.reduce((s, t) => s + t.amount, 0);
+  const balance = walletBalanceFrom(txns);
 
   return (
     <motion.div
@@ -175,8 +178,8 @@ function UserDetail({ user, onBack }: { user: UserActivity; onBack: () => void }
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
     >
       <div className="flex items-center gap-3 p-5 border-b border-border">
-        <button onClick={onBack} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-          <ArrowLeft size={16} className="text-foreground" />
+        <button onClick={onBack} aria-label="Back to user list" className="w-11 h-11 rounded-full bg-secondary flex items-center justify-center">
+          <ArrowLeft size={16} className="text-foreground" aria-hidden="true" />
         </button>
         <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-lg">{user.avatar}</div>
         <div>
@@ -247,8 +250,8 @@ function UsersModal({ users, onClose }: { users: UserActivity[]; onClose: () => 
       >
         <div className="flex items-center justify-between p-5 border-b border-border">
           <h2 className="font-bold text-lg text-foreground">User Activity</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-            <X size={16} className="text-foreground" />
+          <button onClick={onClose} aria-label="Close user activity" className="w-11 h-11 rounded-full bg-secondary flex items-center justify-center">
+            <X size={16} className="text-foreground" aria-hidden="true" />
           </button>
         </div>
         <div className="overflow-y-auto flex-1 p-4 pb-8">
@@ -299,7 +302,7 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 export function AdminAccessPage() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
-  const [adminTab, setAdminTab] = useState<'overview' | 'transactions' | 'hangouts' | 'merchants'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview' | 'transactions' | 'hangouts' | 'merchants' | 'rewards'>('overview');
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [showUsers, setShowUsers] = useState(false);
@@ -386,7 +389,7 @@ export function AdminAccessPage() {
   };
 
   const handleDeleteActivity = (activity: Activity) => {
-    if (!confirm(`Delete "${activity.title}"?\n\nIt is removed from the Hangouts catalogue. Existing plans that already chose it are not affected.`)) return;
+    if (!confirm(`Delete "${activity.title}"?\n\nThis permanently removes it from the database and the Hangouts catalogue.`)) return;
     deleteActivity(activity.id);
     reload();
   };
@@ -437,7 +440,7 @@ export function AdminAccessPage() {
     if (!confirm(
       `Hide "${m.name}"?\n\nIt will no longer be scannable on the pay screen. Past payments keep the XP they earned, and the merchant can be restored later.`
     )) return;
-    deactivateMerchant(m.id);
+    deleteMerchant(m.id);
     toast.success(`${m.name} hidden from the scan list`);
     setMerchants(getMerchants());
   };
@@ -445,36 +448,37 @@ export function AdminAccessPage() {
 
   return (
     <div className="flex flex-col h-full bg-white" style={{ position: 'relative' }}>
-      {/* Header — blue gradient, matches DarkHeader look, with profile switcher */}
-      <div className="bg-gradient-to-b from-[#1e2a4a] to-[#2d3f6a] px-5 pt-12 pb-4 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/profile')} className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
-              <ChevronLeft size={20} className="text-white" />
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-                <Shield size={18} className="text-white" />
-              </div>
-              <div>
-                <div className="text-white font-bold text-base">Management Portal</div>
-                <div className="text-white/60 text-xs">NETS Pulse Dashboard</div>
-              </div>
-            </div>
+      {/* Header — blue gradient, matches DarkHeader look. The title block shrinks
+          and truncates, and the sign-out control collapses to an icon, so the
+          row stays on one line down to a 320px-wide phone. */}
+      <div data-dark-surface className="bg-gradient-to-b from-[#1e2a4a] to-[#2d3f6a] px-4 pt-12 pb-4 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 flex-shrink-0 rounded-xl bg-white/20 flex items-center justify-center">
+            <Shield size={18} className="text-white" aria-hidden="true" />
           </div>
-          {/* Profile switcher */}
-          <button onClick={() => setShowAccountSwitcher(true)} className="flex items-center gap-2 bg-white/15 rounded-full pl-1 pr-3 py-1">
-            <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center text-base">{currentUser.avatar}</div>
-            <ChevronRight size={14} className="text-white/70" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-white font-bold text-sm min-[360px]:text-base">Management Portal</div>
+            <div className="truncate text-white/60 text-xs">NETS Pulse Dashboard</div>
+          </div>
+          <button
+            onClick={() => { logout(); navigate('/login', { replace: true }); }}
+            aria-label="Sign out of the management portal"
+            className="flex h-11 flex-shrink-0 items-center gap-2 rounded-full bg-white/15 px-3 text-white text-xs font-bold"
+          >
+            <LogOut size={14} className="text-white/80" aria-hidden="true" />
+            <span className="hidden min-[360px]:inline">Sign Out</span>
           </button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 px-4 py-3 bg-white border-b border-border flex-shrink-0 overflow-x-auto">
-        {(['overview', 'transactions', 'hangouts', 'merchants'] as const).map((t) => (
+      {/* Tabs — a two-by-two grid on the narrowest phones and a single row from
+          360px up. Previously this was a horizontally scrolling flex row, which
+          exposed a scrollbar and clipped the last tab at 320px. */}
+      <div className="grid grid-cols-2 gap-1.5 px-4 py-3 bg-white border-b border-border flex-shrink-0 min-[360px]:grid-cols-3 min-[560px]:grid-cols-5">
+        {(['overview', 'transactions', 'hangouts', 'merchants', 'rewards'] as const).map((t) => (
           <button key={t} onClick={() => setAdminTab(t)}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold capitalize transition-all whitespace-nowrap ${adminTab === t ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
+            aria-pressed={adminTab === t}
+            className={`min-h-11 rounded-full px-2 text-xs font-bold capitalize transition-all ${adminTab === t ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
             {t}
           </button>
         ))}
@@ -540,7 +544,7 @@ export function AdminAccessPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-2">
               <button onClick={handleRefresh} className="bg-white rounded-xl p-3 flex flex-col items-center gap-2 border-2 border-border active:scale-95 transition-transform">
                 <RefreshCw size={18} className={`text-primary ${refreshing ? 'animate-spin' : ''}`} />
                 <span className="text-muted-foreground text-xs font-semibold">{refreshing ? 'Refreshing' : 'Refresh'}</span>
@@ -548,6 +552,10 @@ export function AdminAccessPage() {
               <button onClick={() => setShowUsers(true)} className="bg-white rounded-xl p-3 flex flex-col items-center gap-2 border-2 border-border active:scale-95 transition-transform">
                 <Users size={18} className="text-primary" />
                 <span className="text-muted-foreground text-xs font-semibold">Users</span>
+              </button>
+              <button onClick={() => navigate('/database')} className="bg-white rounded-xl p-3 flex flex-col items-center gap-2 border-2 border-border active:scale-95 transition-transform">
+                <Database size={18} className="text-primary" />
+                <span className="text-muted-foreground text-xs font-semibold">Database</span>
               </button>
             </div>
           </div>
@@ -754,9 +762,7 @@ export function AdminAccessPage() {
                   </>
                 )}
 
-                <label className="text-xs text-muted-foreground mb-2 block">
-                  Also known as (comma separated)
-                </label>
+                <label className="text-xs text-muted-foreground mb-2 block">Also known as (comma separated)</label>
                 <input value={mAliases} onChange={(e) => setMAliases(e.target.value)}
                   placeholder="e.g. Kopitiam Food Court, Kopitiam @ Bugis"
                   className="w-full mb-1 px-4 py-3 rounded-xl bg-secondary text-foreground outline-none" />
@@ -802,6 +808,8 @@ export function AdminAccessPage() {
             )}
           </div>
         )}
+
+        {adminTab === 'rewards' && <AdminRewardsTab />}
       </div>
 
       <AnimatePresence>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Store, Plus, Pencil, Trash2, X, Sparkles } from 'lucide-react';
+import { Store, Plus, Pencil, Trash2, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { Toaster } from '../components/ui/sonner';
@@ -8,7 +8,7 @@ import { useAppEvents } from '../utils/useAppEvents';
 import {
   getMerchants,
   saveMerchant,
-  deactivateMerchant,
+  deleteMerchant,
   DEFAULT_XP_BONUS,
   DEFAULT_XP_RATE,
   type Merchant,
@@ -33,8 +33,6 @@ export function ManageMerchantsPage() {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
-  const [xpRate, setXpRate] = useState(String(DEFAULT_XP_RATE));
-  const [xpBonus, setXpBonus] = useState(String(DEFAULT_XP_BONUS));
 
   useAppEvents(['merchantsUpdated'], () => setMerchants(getMerchants()));
 
@@ -44,8 +42,6 @@ export function ManageMerchantsPage() {
     setName('');
     setAmount('');
     setReference('');
-    setXpRate(String(DEFAULT_XP_RATE));
-    setXpBonus(String(DEFAULT_XP_BONUS));
   };
 
   const openEdit = (merchant: Merchant) => {
@@ -54,8 +50,6 @@ export function ManageMerchantsPage() {
     setName(merchant.name);
     setAmount(merchant.amount.toFixed(2));
     setReference(merchant.reference ?? '');
-    setXpRate(String(merchant.xpRate));
-    setXpBonus(String(merchant.xpBonus));
   };
 
   const closeForm = () => {
@@ -76,26 +70,15 @@ export function ManageMerchantsPage() {
       return;
     }
 
-    const parsedRate = parseFloat(xpRate);
-    if (isNaN(parsedRate) || parsedRate <= 0) {
-      toast.error('XP rate must be greater than 0');
-      return;
-    }
-    const parsedBonus = parseFloat(xpBonus);
-    if (isNaN(parsedBonus) || parsedBonus < 1) {
-      toast.error('Bonus multiplier must be at least 1');
-      return;
-    }
-
     saveMerchant({
       id: editing ? editing.id : makeId(trimmedName),
       name: trimmedName,
       amount: parsedAmount,
       reference: reference.trim() || undefined,
-      xpRate: parsedRate,
-      xpBonus: parsedBonus,
-      // Campaign scheduling and aliases are managed in the admin portal; keep
-      // whatever is already configured rather than clearing it here.
+      xpRate: editing?.xpRate ?? DEFAULT_XP_RATE,
+      xpBonus: editing?.xpBonus ?? DEFAULT_XP_BONUS,
+      // XP rate, campaign scheduling and aliases are managed in the admin
+      // portal; keep whatever is configured rather than clearing it here.
       campaignStart: editing?.campaignStart ?? null,
       campaignEnd: editing?.campaignEnd ?? null,
       aliases: editing?.aliases ?? [],
@@ -108,21 +91,11 @@ export function ManageMerchantsPage() {
   // Soft delete: the row is kept so historical transactions keep pricing
   // against the rate that was live when they happened.
   const handleRemove = (merchant: Merchant) => {
-    deactivateMerchant(merchant.id);
+    deleteMerchant(merchant.id);
     toast.success(`${merchant.name} hidden from the scan list`);
   };
 
   const showForm = isNew || editing !== null;
-
-  // Mirrors calculateTransactionXP so the admin sees the exact figure a
-  // customer will be awarded before saving.
-  const previewAmount = parseFloat(amount);
-  const previewRate = parseFloat(xpRate);
-  const previewBonus = parseFloat(xpBonus);
-  const previewXP =
-    previewAmount > 0 && previewRate > 0 && previewBonus >= 1
-      ? Math.max(1, Math.round(previewAmount * previewRate * previewBonus))
-      : null;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -157,8 +130,8 @@ export function ManageMerchantsPage() {
               <h3 className="text-sm font-bold text-foreground">
                 {editing ? 'Edit Merchant' : 'New Merchant'}
               </h3>
-              <button onClick={closeForm} className="text-muted-foreground">
-                <X className="w-5 h-5" />
+              <button onClick={closeForm} aria-label="Close merchant form" className="grid h-11 w-11 place-items-center text-muted-foreground">
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
@@ -186,40 +159,6 @@ export function ManageMerchantsPage() {
               placeholder="e.g. Set A"
               className="w-full mb-4 px-4 py-3 rounded-xl bg-secondary text-foreground outline-none"
             />
-
-            <div className="mb-4 grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-2 block">XP per $1</label>
-                <input
-                  value={xpRate}
-                  onChange={(e) => setXpRate(e.target.value)}
-                  inputMode="decimal"
-                  placeholder={String(DEFAULT_XP_RATE)}
-                  className="w-full px-4 py-3 rounded-xl bg-secondary text-foreground outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-2 block">Bonus multiplier</label>
-                <input
-                  value={xpBonus}
-                  onChange={(e) => setXpBonus(e.target.value)}
-                  inputMode="decimal"
-                  placeholder={String(DEFAULT_XP_BONUS)}
-                  className="w-full px-4 py-3 rounded-xl bg-secondary text-foreground outline-none"
-                />
-              </div>
-            </div>
-
-            {previewXP !== null && (
-              <div className="mb-4 flex items-center gap-2 rounded-xl bg-primary/10 px-4 py-3">
-                <Sparkles className="w-4 h-4 text-primary shrink-0" />
-                <p className="text-xs text-foreground">
-                  A ${parseFloat(amount).toFixed(2)} payment here earns{' '}
-                  <span className="font-bold">{previewXP.toLocaleString()} XP</span>
-                  {parseFloat(xpBonus) > 1 ? ` (${parseFloat(xpBonus)}x bonus applied)` : ''}
-                </p>
-              </div>
-            )}
 
             <button
               onClick={handleSave}
@@ -251,16 +190,6 @@ export function ManageMerchantsPage() {
                     ${merchant.amount.toFixed(2)}
                     {merchant.reference ? ` · ${merchant.reference}` : ''}
                   </p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
-                      {merchant.xpRate} XP / $1
-                    </span>
-                    {merchant.xpBonus > 1 && (
-                      <span className="rounded-full bg-[#fff2bd] px-2 py-0.5 text-[10px] font-bold text-[#7a5a00]">
-                        {merchant.xpBonus}x bonus
-                      </span>
-                    )}
-                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0 ml-3">
                   <button

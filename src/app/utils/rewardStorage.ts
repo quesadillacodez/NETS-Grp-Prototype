@@ -16,6 +16,12 @@ export interface Reward {
   tags: string[];
   description: string;
   validityDays: number;
+  /**
+   * Where the reward can be redeemed, used to sort and filter by distance.
+   * Omitted for rewards with no physical outlet (wallet cashback); use
+   * "Multiple outlets" for chains that are available everywhere.
+   */
+  area?: string;
 }
 
 export interface RewardRedemption {
@@ -28,6 +34,73 @@ export interface RewardRedemption {
   refCode: string;
   redeemedAt: number;
   used: boolean;
+  /** Epoch ms the voucher lapses. 0 means it never expires (instant cashback). */
+  expiresAt: number;
+  usedAt?: number;
+}
+
+/**
+ * A voucher is in exactly one state at a time. `applied` is reserved for
+ * instant wallet cashback, which is credited immediately and has nothing left
+ * to redeem at a merchant.
+ */
+export type RedemptionStatus = 'applied' | 'used' | 'expired' | 'active';
+
+export function isCashbackRedemption(redemption: Pick<RewardRedemption, 'merchant' | 'title'>): boolean {
+  return redemption.merchant === 'NETS Wallet' && /cashback/i.test(redemption.title);
+}
+
+export function getRedemptionStatus(redemption: RewardRedemption, now = Date.now()): RedemptionStatus {
+  if (isCashbackRedemption(redemption)) return 'applied';
+  if (redemption.used) return 'used';
+  if (redemption.expiresAt > 0 && redemption.expiresAt < now) return 'expired';
+  return 'active';
+}
+
+export const REDEMPTION_STATUS_LABELS: Record<RedemptionStatus, string> = {
+  applied: 'Applied',
+  used: 'Used',
+  expired: 'Expired',
+  active: 'Active',
+};
+
+export function formatExpiry(expiresAt: number): string {
+  if (expiresAt <= 0) return 'No expiry';
+  return new Date(expiresAt).toLocaleDateString('en-SG', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
+
+export function daysUntilExpiry(expiresAt: number, now = Date.now()): number | null {
+  if (expiresAt <= 0) return null;
+  return Math.ceil((expiresAt - now) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Terms are derived from the reward itself rather than stored per row, so a
+ * voucher's conditions always match the validity and merchant it was issued
+ * against.
+ */
+export function getRewardTerms(reward: Pick<Reward, 'merchant' | 'validityDays' | 'category'>): string[] {
+  const terms = [
+    'One voucher code per redemption. A code cannot be reissued once it has been marked as used.',
+  ];
+
+  if (reward.validityDays > 0) {
+    terms.push(
+      `Valid for ${reward.validityDays} days from the date of redemption. Expired vouchers cannot be used and the XP spent is not refunded.`,
+      `Redeemable at participating ${reward.merchant} outlets that accept NETS payment.`,
+      'Cannot be exchanged for cash, and cannot be combined with other promotions or discounts.',
+    );
+  } else {
+    terms.push(
+      'Cashback is credited to your NETS wallet immediately and cannot be reversed once redeemed.',
+      'The credited amount forms part of your wallet balance and is subject to the wallet limit.',
+    );
+  }
+
+  terms.push('NETS may withdraw or amend this reward at any time without prior notice.');
+  return terms;
 }
 
 export interface XPHistoryEntry {
@@ -79,19 +152,67 @@ export interface MonthlyXPSummary {
 export const WELCOME_XP = 500;
 
 export const REWARDS: Reward[] = [
-  { id: 1, merchant: 'NETS Wallet', title: '$5 Wallet Cashback', xpCost: 500, category: 'Cashback', icon: 'S$', tags: ['Instant'], description: 'Credit $5 directly to your NETS wallet balance.', validityDays: 0 },
-  { id: 2, merchant: 'Hawker Centres', title: '$5 Heartland Voucher', xpCost: 500, category: 'Vouchers', icon: 'HC', tags: ['Local', 'Food'], description: 'Use at participating NETS-enabled hawker stalls.', validityDays: 30 },
-  { id: 3, merchant: 'NYP Campus Food Court', title: '$1.50 Student Meal Credit', xpCost: 150, category: 'Vouchers', icon: 'NYP', tags: ['Campus'], description: 'A student-friendly meal credit for participating campus stalls.', validityDays: 21 },
-  { id: 4, merchant: 'Tiong Bahru Chicken Rice', title: '$2 Off Chicken Rice Set', xpCost: 200, category: 'Vouchers', icon: 'TB', tags: ['Local', 'Food'], description: 'Redeem on one chicken rice set at the participating stall.', validityDays: 30 },
-  { id: 5, merchant: 'Old Chang Kee', title: 'Free Curry Puff', xpCost: 180, category: 'Vouchers', icon: 'OCK', tags: ['Food'], description: 'One classic curry puff with any two-item purchase.', validityDays: 14 },
-  { id: 6, merchant: 'Kopitiam', title: '$3 Coffee Voucher', xpCost: 300, category: 'Vouchers', icon: 'K', tags: ['Local', 'Drinks'], description: 'Valid at participating Kopitiam drink stalls.', validityDays: 30 },
-  { id: 7, merchant: 'Ya Kun Kaya Toast', title: '$5 Breakfast Set', xpCost: 450, category: 'Partner Deals', icon: 'YK', tags: ['Food'], description: 'Redeem a selected traditional breakfast set.', validityDays: 30 },
-  { id: 8, merchant: 'Grab', title: '$10 Ride Credit', xpCost: 1000, category: 'Partner Deals', icon: 'G', tags: ['Travel'], description: 'Receive a digital ride credit code in your rewards wallet.', validityDays: 45 },
-  { id: 9, merchant: 'Popular Bookstore', title: '15% Off Stationery', xpCost: 600, category: 'Partner Deals', icon: 'P', tags: ['Campus'], description: 'Save on one stationery purchase at participating outlets.', validityDays: 30 },
-  { id: 10, merchant: 'LiHO TEA', title: '1-for-1 Medium Milk Tea', xpCost: 350, category: 'Partner Deals', icon: 'L', tags: ['Drinks'], description: 'Redeem one complimentary medium drink with purchase.', validityDays: 14 },
-  { id: 11, merchant: 'FairPrice', title: '$8 Grocery Voucher', xpCost: 800, category: 'Vouchers', icon: 'FP', tags: ['Essentials'], description: 'Use on a minimum $40 grocery purchase.', validityDays: 30 },
-  { id: 12, merchant: 'NETS Wallet', title: '$10 Wallet Cashback', xpCost: 1000, category: 'Cashback', icon: 'S$', tags: ['Instant'], description: 'Credit $10 directly to your NETS wallet balance.', validityDays: 0 },
+  { id: 1, merchant: 'NETS Wallet', title: '$5 Wallet Cashback', xpCost: 500, category: 'Cashback', icon: '💵', tags: ['Instant'], description: 'Credit $5 directly to your NETS wallet balance.', validityDays: 0 },
+  { id: 2, merchant: 'Hawker Centres', title: '$5 Heartland Voucher', xpCost: 500, category: 'Vouchers', icon: '🍜', tags: ['Local', 'Food'], description: 'Use at participating NETS-enabled hawker stalls.', validityDays: 30, area: 'Multiple outlets' },
+  { id: 3, merchant: 'NYP Campus Food Court', title: '$1.50 Student Meal Credit', xpCost: 150, category: 'Vouchers', icon: '🍱', tags: ['Campus'], description: 'A student-friendly meal credit for participating campus stalls.', validityDays: 21, area: 'Ang Mo Kio' },
+  { id: 4, merchant: 'Tiong Bahru Chicken Rice', title: '$2 Off Chicken Rice Set', xpCost: 200, category: 'Vouchers', icon: '🍗', tags: ['Local', 'Food'], description: 'Redeem on one chicken rice set at the participating stall.', validityDays: 30, area: 'Tiong Bahru' },
+  { id: 5, merchant: 'Old Chang Kee', title: 'Free Curry Puff', xpCost: 180, category: 'Vouchers', icon: '🥟', tags: ['Food'], description: 'One classic curry puff with any two-item purchase.', validityDays: 14, area: 'Somerset' },
+  { id: 6, merchant: 'Kopitiam', title: '$3 Coffee Voucher', xpCost: 300, category: 'Vouchers', icon: '☕', tags: ['Local', 'Drinks'], description: 'Valid at participating Kopitiam drink stalls.', validityDays: 30, area: 'Dhoby Ghaut' },
+  { id: 7, merchant: 'Ya Kun Kaya Toast', title: '$5 Breakfast Set', xpCost: 450, category: 'Partner Deals', icon: '🍞', tags: ['Food'], description: 'Redeem a selected traditional breakfast set.', validityDays: 30, area: 'Raffles Place' },
+  { id: 8, merchant: 'Grab', title: '$10 Ride Credit', xpCost: 1000, category: 'Partner Deals', icon: '🚗', tags: ['Travel'], description: 'Receive a digital ride credit code in your rewards wallet.', validityDays: 45, area: 'Multiple outlets' },
+  { id: 9, merchant: 'Popular Bookstore', title: '15% Off Stationery', xpCost: 600, category: 'Partner Deals', icon: '📚', tags: ['Campus'], description: 'Save on one stationery purchase at participating outlets.', validityDays: 30, area: 'Bras Basah' },
+  { id: 10, merchant: 'LiHO TEA', title: '1-for-1 Medium Milk Tea', xpCost: 350, category: 'Partner Deals', icon: '🧋', tags: ['Drinks'], description: 'Redeem one complimentary medium drink with purchase.', validityDays: 14, area: 'Orchard' },
+  { id: 11, merchant: 'FairPrice', title: '$8 Grocery Voucher', xpCost: 800, category: 'Vouchers', icon: '🛒', tags: ['Essentials'], description: 'Use on a minimum $40 grocery purchase.', validityDays: 30, area: 'Toa Payoh' },
+  { id: 12, merchant: 'NETS Wallet', title: '$10 Wallet Cashback', xpCost: 1000, category: 'Cashback', icon: '💵', tags: ['Instant'], description: 'Credit $10 directly to your NETS wallet balance.', validityDays: 0 },
 ];
+
+/**
+ * Picks the emoji shown on a reward. Matched on the merchant and title first so
+ * a bubble tea shop looks like bubble tea, then falling back to the kind of
+ * reward it is.
+ */
+const REWARD_EMOJI_KEYWORDS: [RegExp, string][] = [
+  [/bubble tea|milk tea|liho|gong cha|chagee|boba/i, '🧋'],
+  [/chicken rice/i, '🍗'],
+  [/curry puff|chang kee/i, '🥟'],
+  [/kaya|toast|bakery|bread/i, '🍞'],
+  [/coffee|kopi/i, '☕'],
+  [/hawker|food court|food centre|heartland/i, '🍜'],
+  [/campus|student|nyp|polytechnic/i, '🍱'],
+  [/peking|duck/i, '🦆'],
+  [/omakase|sushi|nobu|japanese/i, '🍣'],
+  [/brunch|caf[eé]|breakfast/i, '🥐'],
+  [/dessert|cake|sweet/i, '🍰'],
+  [/aquarium|s\.e\.a\.|marine/i, '🐠'],
+  [/garden|flower|botanic|forest/i, '🌿'],
+  [/safari|wildlife|zoo|night safari/i, '🦁'],
+  [/ride|grab|taxi|transport/i, '🚗'],
+  [/book|stationery|popular/i, '📚'],
+  [/fairprice|grocer|supermarket|ntuc/i, '🛒'],
+  [/cashback|wallet/i, '💵'],
+  [/restaurant|dining|set meal|lunch|dinner/i, '🍽️'],
+];
+
+const CATEGORY_EMOJI: Record<RewardCategory, string> = {
+  Cashback: '💵',
+  Vouchers: '🎟️',
+  'Partner Deals': '🎁',
+};
+
+export function rewardEmoji(input: {
+  merchant: string;
+  title: string;
+  category: RewardCategory;
+  /** The Hangout-style category a partner deal came from, when known. */
+  dealCategory?: string;
+}): string {
+  const haystack = `${input.merchant} ${input.title}`;
+  const keyword = REWARD_EMOJI_KEYWORDS.find(([pattern]) => pattern.test(haystack));
+  if (keyword) return keyword[1];
+  if (input.dealCategory === 'food') return '🍽️';
+  if (input.dealCategory) return '🎢';
+  return CATEGORY_EMOJI[input.category];
+}
 
 export function getRewardsCatalog(): Reward[] {
   const partnerRewards: Reward[] = getDeals().map(deal => ({
@@ -100,10 +221,16 @@ export function getRewardsCatalog(): Reward[] {
     title: deal.title,
     xpCost: Math.max(150, Math.round(deal.savings * 20 / 50) * 50),
     category: 'Partner Deals',
-    icon: deal.merchant.split(/\s+/).map(word => word[0]).join('').slice(0, 3).toUpperCase(),
+    icon: rewardEmoji({
+      merchant: deal.merchant,
+      title: deal.title,
+      category: 'Partner Deals',
+      dealCategory: deal.category,
+    }),
     tags: [deal.category === 'food' ? 'Food' : 'Experience', deal.location],
     description: deal.description,
     validityDays: 30,
+    area: deal.location,
   }));
   return [...REWARDS, ...partnerRewards];
 }
@@ -147,6 +274,8 @@ export function calculateTransactionXP(
   return { xp: base };
 }
 
+const TIER_MULTIPLIERS = [1, 1.1, 1.2, 1.3];
+
 /**
  * Earn multiplier granted by the user's tier. Kept deliberately small so it
  * rewards loyalty without dwarfing the merchant campaigns it stacks with -
@@ -154,23 +283,6 @@ export function calculateTransactionXP(
  */
 export function tierMultiplier(level: number): number {
   return TIER_MULTIPLIERS[level - 1] ?? 1;
-}
-
-const TIER_MULTIPLIERS = [1, 1.1, 1.2, 1.3];
-
-export function getRewardRedemptions(userId: string): RewardRedemption[] {
-  return query('SELECT * FROM reward_redemptions WHERE user_id = ? ORDER BY redeemed_at DESC', [userId])
-    .map(row => ({
-      id: Number(row.id),
-      userId: String(row.user_id),
-      rewardId: Number(row.reward_id),
-      title: String(row.title),
-      merchant: String(row.merchant),
-      xpCost: Number(row.xp_cost),
-      refCode: String(row.ref_code),
-      redeemedAt: Number(row.redeemed_at),
-      used: Number(row.used) === 1,
-    }));
 }
 
 /**
@@ -186,8 +298,7 @@ export function applyTierMultipliers(entries: XPHistoryEntry[]): XPHistoryEntry[
   let lifetime = 0;
   return ascending.map(entry => {
     if (entry.type !== 'earn') return entry;
-    const level = getTier(lifetime).level;
-    const multiplier = tierMultiplier(level);
+    const multiplier = tierMultiplier(getTier(lifetime).level);
     const xp = Math.max(1, Math.round(entry.xp * multiplier));
     lifetime += xp;
     if (multiplier === 1) return { ...entry, xp };
@@ -195,6 +306,8 @@ export function applyTierMultipliers(entries: XPHistoryEntry[]): XPHistoryEntry[
     return { ...entry, xp, bonus: entry.bonus ? `${entry.bonus} + ${suffix}` : suffix };
   });
 }
+
+const MISSION_COUNT = 5;
 
 /** Quest XP for every day the user completed at least one mission. */
 function getQuestEntries(signals: QuestSignal[]): XPHistoryEntry[] {
@@ -218,7 +331,22 @@ function getQuestEntries(signals: QuestSignal[]): XPHistoryEntry[] {
   return entries;
 }
 
-const MISSION_COUNT = 5;
+export function getRewardRedemptions(userId: string): RewardRedemption[] {
+  return query('SELECT * FROM reward_redemptions WHERE user_id = ? ORDER BY redeemed_at DESC', [userId])
+    .map(row => ({
+      id: Number(row.id),
+      userId: String(row.user_id),
+      rewardId: Number(row.reward_id),
+      title: String(row.title),
+      merchant: String(row.merchant),
+      xpCost: Number(row.xp_cost),
+      refCode: String(row.ref_code),
+      redeemedAt: Number(row.redeemed_at),
+      used: Number(row.used) === 1,
+      expiresAt: Number(row.expires_at ?? 0),
+      usedAt: row.used_at == null ? undefined : Number(row.used_at),
+    }));
+}
 
 export function getXPHistory(userId: string): XPHistoryEntry[] {
   const transactions = query(
@@ -245,9 +373,7 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
   // A refunded payment claws back the XP it earned, so the ledger keeps an
   // explicit reversal rather than silently recomputing a smaller balance.
   const refunds: XPHistoryEntry[] = query(
-    `SELECT id, name, amount, created_at, payment_id
-       FROM transactions
-      WHERE user_id = ? AND kind = 'refund'`,
+    `SELECT id, name, amount, created_at FROM transactions WHERE user_id = ? AND kind = 'refund'`,
     [userId],
   ).map(row => {
     const at = Number(row.created_at ?? row.id);
@@ -261,7 +387,6 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
       createdAt: at,
     };
   });
-
   const spent: XPHistoryEntry[] = getRewardRedemptions(userId).map(redemption => ({
     id: `redemption-${redemption.id}`,
     title: redemption.title,
@@ -278,7 +403,6 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     type: 'earn',
     createdAt: 1,
   };
-
   const quests = getQuestEntries(getQuestSignals(userId));
   const withTiers = applyTierMultipliers([welcome, ...earned, ...quests]);
   return [...withTiers, ...spent, ...refunds].sort((a, b) => b.createdAt - a.createdAt);
@@ -328,11 +452,13 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
   const now = Date.now();
   const refCode = `XP-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   const instantCashback = reward.merchant === 'NETS Wallet' && reward.category === 'Cashback';
+  const expiresAt = reward.validityDays > 0 ? now + reward.validityDays * 24 * 60 * 60 * 1000 : 0;
   run(
     `INSERT INTO reward_redemptions
-      (user_id, reward_id, title, merchant, xp_cost, ref_code, redeemed_at, used)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, reward.id, reward.title, reward.merchant, reward.xpCost, refCode, now, instantCashback ? 1 : 0],
+      (user_id, reward_id, title, merchant, xp_cost, ref_code, redeemed_at, used, expires_at, used_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, reward.id, reward.title, reward.merchant, reward.xpCost, refCode, now,
+      instantCashback ? 1 : 0, expiresAt, instantCashback ? now : null],
   );
   const redemption: RewardRedemption = {
     id: lastInsertId(),
@@ -344,6 +470,8 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
     refCode,
     redeemedAt: now,
     used: instantCashback,
+    expiresAt,
+    usedAt: instantCashback ? now : undefined,
   };
   if (instantCashback) {
     const match = reward.title.match(/\$(\d+(?:\.\d+)?)/);
@@ -353,7 +481,7 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
         `INSERT INTO transactions
           (user_id, name, amount, date, category, status, kind, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, 'NETS XP Cashback', amount, 'Just now', 'reward', 'received', 'cashback', now],
+        [userId, 'NETS XP Cashback', amount, 'Just now', 'reward', null, 'cashback', now],
       );
       window.dispatchEvent(new CustomEvent('transactionsUpdated'));
     }
@@ -362,9 +490,26 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
   return redemption;
 }
 
-export function markRewardUsed(redemptionId: number, userId: string): void {
-  run('UPDATE reward_redemptions SET used = 1 WHERE id = ? AND user_id = ?', [redemptionId, userId]);
+/**
+ * Mark a voucher as used at the merchant. An expired voucher is refused, so the
+ * status shown on the voucher and what the app allows can never disagree.
+ */
+export function markRewardUsed(redemptionId: number, userId: string): { ok: boolean; reason?: string } {
+  const redemption = getRewardRedemptions(userId).find(item => item.id === redemptionId);
+  if (!redemption) return { ok: false, reason: 'That voucher could not be found.' };
+
+  const status = getRedemptionStatus(redemption);
+  if (status === 'expired') {
+    return { ok: false, reason: `This voucher expired on ${formatExpiry(redemption.expiresAt)}.` };
+  }
+  if (status === 'used') return { ok: false, reason: 'This voucher has already been used.' };
+
+  run(
+    'UPDATE reward_redemptions SET used = 1, used_at = ? WHERE id = ? AND user_id = ?',
+    [Date.now(), redemptionId, userId],
+  );
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
+  return { ok: true };
 }
 
 /**

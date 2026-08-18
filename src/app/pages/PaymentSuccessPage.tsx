@@ -7,8 +7,11 @@ import { addTransaction, formatDateForTransaction, hasProcessedPayment, markPaym
 import { addReminders, getAllReminders } from '../utils/reminderStorage';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { addNotification } from '../utils/notificationStorage';
+import { payHangout } from '../utils/hangoutStorage';
 import { useRequiredState } from '../utils/useRequiredState';
 import { resolvePaymentCategory, type PaymentFlowContext, type SplitParticipant } from '../utils/paymentFlow';
+import { celebrate } from '../utils/motionPreference';
+import { recordMerchantSale } from '../utils/merchantInsightStorage';
 
 interface PaymentSuccessState extends Record<string, unknown>, PaymentFlowContext {
   participants: SplitParticipant[];
@@ -32,7 +35,7 @@ export function PaymentSuccessPage() {
 
   useEffect(() => {
     const currentUser = getCurrentUser();
-    confetti({ particleCount: 80, spread: 60, origin: { y: 0.5 }, colors: ['#1e2a4a', '#4f5d7a', '#10b981'] });
+    celebrate(confetti, { particleCount: 80, spread: 60, origin: { y: 0.5 }, colors: ['#1e2a4a', '#4f5d7a', '#047857'] });
 
     if (!paymentId || hasProcessedPayment(paymentId)) return;
 
@@ -44,6 +47,13 @@ export function PaymentSuccessPage() {
       kind: 'purchase',
       paymentId,
     }, currentUser.id);
+    recordMerchantSale({
+      merchantName,
+      itemName: state?.reference,
+      amount,
+      userId: currentUser.id,
+      paymentId,
+    });
 
     if (friends.length === 0) {
       markPaymentProcessed(paymentId);
@@ -79,10 +89,14 @@ export function PaymentSuccessPage() {
           message: `Hey! Remember to pay ${currentUser.name} $${reminder.amount.toFixed(2)} for ${merchantName}. Total bill was $${amount.toFixed(2)}`,
           amount: reminder.amount, category: reminder.category,
           timestamp: new Date().toISOString(), read: false, reminderId: reminder.id,
+          channel: 'reminders', link: '/reminders',
         });
       });
     }
     markPaymentProcessed(paymentId);
+    // If this split was for a hangout activity, mark it paid (once) so the
+    // hangout shows its ticket and the Pay button never returns.
+    if (state?.hangoutId != null) payHangout(state.hangoutId);
   }, []);
 
   if (!state) return null;
@@ -91,8 +105,15 @@ export function PaymentSuccessPage() {
     <div className="flex flex-col h-full bg-gradient-to-b from-success/10 to-white">
       <div className="flex flex-col items-center justify-center flex-1 px-5 py-4">
 
+        {/* Announced to screen readers the moment the page renders, so the
+            outcome of a payment is never conveyed by colour and icon alone. */}
+        <p role="status" aria-live="assertive" className="sr-only">
+          Payment successful. You paid ${amount.toFixed(2)} to {merchantName}.
+          {friends.length > 0 && ` ${friends.length} ${friends.length === 1 ? 'friend has' : 'friends have'} been added to reminders.`}
+        </p>
+
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', duration: 0.5 }} className="w-16 h-16 rounded-full bg-gradient-to-br from-success to-green-400 flex items-center justify-center mb-3 shadow-xl">
-          <Check className="w-8 h-8 text-white" strokeWidth={3} />
+          <Check className="w-8 h-8 text-white" strokeWidth={3} aria-hidden="true" />
         </motion.div>
 
         <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="text-2xl font-bold text-foreground mb-1">

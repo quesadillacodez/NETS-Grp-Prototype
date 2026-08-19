@@ -436,8 +436,26 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     createdAt: 1,
     neverExpires: true,
   };
+  // XP carried over from before the demo window. Only the presentation
+  // scenario writes this, so a real account never has one; it exists because a
+  // long-standing customer would not start the demo from zero, and stating it
+  // as one grant is more honest than inventing months of transactions to reach
+  // the same figure.
+  const carried = query('SELECT value FROM app_meta WHERE key = ?', [`demo-xp-carryover:${userId}`]);
+  const carryOver: XPHistoryEntry[] = carried.length && Number(carried[0].value) > 0
+    ? [{
+        id: 'carry-over',
+        title: 'Earlier NETS activity',
+        subtitle: 'XP carried into this account',
+        xp: Number(carried[0].value),
+        type: 'earn',
+        createdAt: 2,
+        neverExpires: true,
+      }]
+    : [];
+
   const quests = buildQuestEntries(getQuestSignals(userId));
-  const withTiers = applyTierMultipliers([welcome, ...earned, ...quests]);
+  const withTiers = applyTierMultipliers([welcome, ...carryOver, ...earned, ...quests]);
   return [...withTiers, ...spent, ...refunds].sort((a, b) => b.createdAt - a.createdAt);
 }
 

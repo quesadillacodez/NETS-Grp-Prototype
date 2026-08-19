@@ -5,6 +5,7 @@ import {
   evaluateDay, getQuestSignals, dayKey, weekKey, WEEKLY_MISSION_XP_CAP, type QuestSignal,
 } from './questStorage';
 import { buildLedger, type XPLedger, type XPLedgerInput } from './xpLedger';
+import { registerVoucher } from './voucherRegistry';
 
 export type RewardCategory = 'Cashback' | 'Vouchers' | 'Partner Deals';
 
@@ -518,6 +519,9 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
       window.dispatchEvent(new CustomEvent('transactionsUpdated'));
     }
   }
+  // Publish it so the voucher can be verified by a phone scanning the QR, which
+  // is not signed in as this customer and cannot read their database.
+  registerVoucher(redemption);
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
   return redemption;
 }

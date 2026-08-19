@@ -11,6 +11,7 @@ import {
   REDEMPTION_STATUS_LABELS,
   type RewardRedemption,
 } from '../utils/rewardStorage';
+import { redeemVoucherRemotely, type RemoteVoucher } from '../utils/voucherRegistry';
 import { useAppEvents } from '../utils/useAppEvents';
 
 interface ScanResult {
@@ -36,6 +37,27 @@ function Row({ label, value, mono, strong }: {
 }
 
 /**
+ * Adapts a server voucher to the shape the screen renders. `userId` and
+ * `rewardId` are not in the index — a merchant verifying a voucher has no
+ * business knowing whose it is — so they are left empty rather than invented.
+ */
+function fromRemote(voucher: RemoteVoucher): RewardRedemption {
+  return {
+    id: 0,
+    userId: '',
+    rewardId: 0,
+    title: voucher.title,
+    merchant: voucher.merchant,
+    xpCost: voucher.xpCost,
+    refCode: voucher.refCode,
+    redeemedAt: voucher.redeemedAt,
+    expiresAt: voucher.expiresAt,
+    used: voucher.used,
+    usedAt: voucher.usedAt || undefined,
+  };
+}
+
+/**
  * Where a scanned voucher QR lands.
  *
  * This is the merchant's side of a redemption: the code in the URL is looked up
@@ -52,7 +74,23 @@ export function VoucherScanPage() {
   // The redemption runs once per scan. Re-running on every render would mark a
   // voucher used and then immediately report it as already used.
   useEffect(() => {
-    setResult(redeemByRefCode(refCode));
+    let cancelled = false;
+
+    (async () => {
+      // The server index is tried first: a phone scanning the QR is not signed
+      // in as the customer, so it has no copy of their database to read.
+      const remote = await redeemVoucherRemotely(refCode);
+      if (cancelled) return;
+      if (remote.reachable && remote.voucher) {
+        setResult({ ok: remote.ok, reason: remote.reason, redemption: fromRemote(remote.voucher) });
+        return;
+      }
+      // Same-device scan, or a voucher redeemed before it was published: the
+      // local record is still authoritative.
+      setResult(redeemByRefCode(refCode));
+    })();
+
+    return () => { cancelled = true; };
   }, [refCode]);
 
   // The database may still be booting when the page opens from a cold scan.

@@ -25,6 +25,17 @@ from the record. The QR carries nothing but the reference code, so a code cannot
 be edited into a voucher for a different reward or a larger amount. A code that
 is unknown, already used or expired says so instead of showing a success screen.
 
+The QR points at the running origin, so it resolves to the deployed site rather
+than to a developer's machine. That alone was not enough to make a scan work,
+though: the synchronized database is only served to an authenticated session, so
+a phone scanning the code — which is not signed in as the customer holding the
+voucher — had nothing to look the code up in. Redemptions are now also published
+to a small server-side index keyed by reference code, and the scan screen
+verifies against that, falling back to the local record for a same-device scan.
+The index holds only what a merchant needs to honour the voucher: no user
+identity, no wallet, no transaction history. Verified by scanning from a second
+browser with no cookies at all.
+
 ---
 
 ## Bounding the XP economy, and warning before XP is lost

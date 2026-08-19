@@ -116,6 +116,10 @@ function makeInitialStore() {
     challenges: {},
     resetTokens: {},
     sync: { revision: 0, updatedAt: 0, updatedBy: null, sqlite: null },
+    // Vouchers are indexed separately from the synchronized SQLite blob: the
+    // blob is opaque to the server, and a voucher has to be verifiable by a
+    // device that is not signed in — the merchant scanning it at the counter.
+    vouchers: {},
     audit: [],
   };
 }
@@ -487,6 +491,32 @@ async function handleApi(req, res, url) {
     return json(res, 200, { ok: true });
   }
 
+  // ── Voucher verification (public) ────────────────────────────────────────
+  // A voucher QR is scanned at the counter by a device that is not signed in,
+  // so these two routes sit ahead of the session gate. They expose one voucher
+  // by its reference code and nothing else — no user identity, no wallet.
+  const voucherMatch = url.pathname.match(/^\/api\/voucher\/([A-Za-z0-9-]{1,32})$/);
+  if (voucherMatch && req.method === 'GET') {
+    const voucher = store.vouchers?.[voucherMatch[1].toUpperCase()];
+    return voucher ? json(res, 200, voucher) : json(res, 404, { error: 'No voucher matches this code.' });
+  }
+
+  const redeemMatch = url.pathname.match(/^\/api\/voucher\/([A-Za-z0-9-]{1,32})\/redeem$/);
+  if (redeemMatch && req.method === 'POST') {
+    const code = redeemMatch[1].toUpperCase();
+    const voucher = store.vouchers?.[code];
+    if (!voucher) return json(res, 404, { error: 'No voucher matches this code.' });
+    if (voucher.used) return json(res, 409, { error: 'This voucher has already been used.', voucher });
+    if (voucher.expiresAt > 0 && voucher.expiresAt < Date.now()) {
+      return json(res, 409, { error: 'This voucher has expired.', voucher });
+    }
+    voucher.used = true;
+    voucher.usedAt = Date.now();
+    audit('voucher_redeemed', { refCode: code });
+    persist();
+    return json(res, 200, { ok: true, voucher });
+  }
+
   const current = getSession(req);
   if (!current) return json(res, 401, { error: 'Your session has expired. Please sign in again.' });
 
@@ -503,6 +533,28 @@ async function handleApi(req, res, url) {
     audit('pin_changed', { userId: current.user.id });
     persist();
     return json(res, 200, { ok: true });
+  }
+
+  if (url.pathname === '/api/voucher' && req.method === 'POST') {
+    const body = await readJson(req);
+    const refCode = String(body.refCode || '').toUpperCase();
+    if (!/^[A-Za-z0-9-]{1,32}$/.test(refCode)) return json(res, 400, { error: 'Invalid voucher reference.' });
+    store.vouchers = store.vouchers || {};
+    // Registration is idempotent, and never resurrects a voucher already spent.
+    if (!store.vouchers[refCode]) {
+      store.vouchers[refCode] = {
+        refCode,
+        title: String(body.title || '').slice(0, 120),
+        merchant: String(body.merchant || '').slice(0, 120),
+        xpCost: Number(body.xpCost) || 0,
+        redeemedAt: Number(body.redeemedAt) || Date.now(),
+        expiresAt: Number(body.expiresAt) || 0,
+        used: Boolean(body.used),
+        usedAt: Number(body.usedAt) || 0,
+      };
+      persist();
+    }
+    return json(res, 200, { ok: true, voucher: store.vouchers[refCode] });
   }
 
   if (url.pathname === '/api/sync/state' && req.method === 'GET') {

@@ -17,6 +17,7 @@ const REDIS_STORE_KEY = process.env.NETS_REDIS_STORE_KEY || 'nets:prototype:auth
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const OTP_TTL_MS = 5 * 60 * 1000;
 const RESET_TTL_MS = 10 * 60 * 1000;
+const PAYMENT_INTENT_TTL_MS = 10 * 60 * 1000;
 const LOCKOUT_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 const MAX_OTP_ATTEMPTS = 5;
@@ -115,6 +116,7 @@ function makeInitialStore() {
     sessions: {},
     challenges: {},
     resetTokens: {},
+    paymentIntents: {},
     sync: { revision: 0, updatedAt: 0, updatedBy: null, sqlite: null },
     // Vouchers are indexed separately from the synchronized SQLite blob: the
     // blob is opaque to the server, and a voucher has to be verifiable by a
@@ -122,6 +124,11 @@ function makeInitialStore() {
     vouchers: {},
     audit: [],
   };
+}
+
+function ensureStoreShape() {
+  if (!store.paymentIntents || typeof store.paymentIntents !== 'object') store.paymentIntents = {};
+  if (!store.vouchers || typeof store.vouchers !== 'object') store.vouchers = {};
 }
 
 function normalizeStoredValue(value) {
@@ -183,6 +190,7 @@ function ensureDemoUsers() {
 }
 
 function cleanExpired(now = Date.now()) {
+  ensureStoreShape();
   let changed = false;
   for (const [key, session] of Object.entries(store.sessions)) {
     if (session.expiresAt <= now) { delete store.sessions[key]; changed = true; }
@@ -193,6 +201,12 @@ function cleanExpired(now = Date.now()) {
   for (const [key, token] of Object.entries(store.resetTokens)) {
     if (token.expiresAt <= now) { delete store.resetTokens[key]; changed = true; }
   }
+  for (const intent of Object.values(store.paymentIntents)) {
+    if (intent.status === 'created' && intent.expiresAt <= now) {
+      intent.status = 'expired';
+      changed = true;
+    }
+  }
   if (changed) persist();
 }
 
@@ -201,6 +215,7 @@ async function prepareStore() {
   // RESET_DEMO_DATA creates a clean store when the local test server starts;
   // it must not erase the session again before the test's next request.
   if (!(process.env.RESET_DEMO_DATA === 'true' && store)) store = await loadStore();
+  ensureStoreShape();
   ensureDemoUsers();
   cleanExpired();
 }
@@ -232,6 +247,33 @@ function publicUser(user) {
     isAdmin: user.isAdmin,
     role: user.role ?? (user.isAdmin ? 'admin' : 'customer'),
     merchantId: user.merchantId,
+  };
+}
+
+function roleOf(user) {
+  return user.role ?? (user.isAdmin ? 'admin' : 'customer');
+}
+
+function requestOrigin(req) {
+  const forwardedProtocol = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const protocol = forwardedProtocol || (IS_PRODUCTION ? 'https' : 'http');
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`).split(',')[0].trim();
+  return `${protocol}://${host}`;
+}
+
+function publicPaymentIntent(intent) {
+  return {
+    paymentId: intent.paymentId,
+    merchantId: intent.merchantId,
+    merchantName: intent.merchantName,
+    amount: intent.amount,
+    reference: intent.reference,
+    itemId: intent.itemId,
+    itemName: intent.itemName,
+    status: intent.status,
+    createdAt: intent.createdAt,
+    expiresAt: intent.expiresAt,
+    paidAt: intent.paidAt,
   };
 }
 
@@ -533,6 +575,93 @@ async function handleApi(req, res, url) {
     audit('pin_changed', { userId: current.user.id });
     persist();
     return json(res, 200, { ok: true });
+  }
+
+  if (url.pathname === '/api/payment-intents' && req.method === 'POST') {
+    const role = roleOf(current.user);
+    if (role !== 'merchant' && role !== 'admin') {
+      return json(res, 403, { error: 'Only a merchant can create a payment QR.' });
+    }
+    const body = await readJson(req);
+    const amount = Number(body.amount);
+    const merchantId = role === 'merchant' ? String(current.user.merchantId || '') : String(body.merchantId || '').trim();
+    const merchantName = role === 'merchant' ? String(current.user.name || '').trim() : String(body.merchantName || '').trim();
+    const reference = String(body.reference || '').trim().slice(0, 120);
+    const itemName = String(body.itemName || '').trim().slice(0, 120);
+    const itemId = body.itemId == null ? undefined : Number(body.itemId);
+    const requestedMinutes = Number(body.expiresInMinutes || PAYMENT_INTENT_TTL_MS / 60_000);
+    const expiresInMinutes = Math.min(60, Math.max(1, Math.round(requestedMinutes)));
+
+    if (!merchantId || !merchantName) return json(res, 400, { error: 'A valid merchant is required.' });
+    if (!Number.isFinite(amount) || amount < 0.01 || amount > 5000) {
+      return json(res, 400, { error: 'Enter an amount between $0.01 and $5,000.' });
+    }
+    if (itemId !== undefined && (!Number.isInteger(itemId) || itemId < 0)) {
+      return json(res, 400, { error: 'The selected menu item is invalid.' });
+    }
+
+    const token = randomBytes(24).toString('base64url');
+    const now = Date.now();
+    const intent = {
+      paymentId: `QR-${randomBytes(10).toString('hex').toUpperCase()}`,
+      merchantId,
+      merchantName: merchantName.slice(0, 120),
+      amount: Math.round(amount * 100) / 100,
+      reference: reference || undefined,
+      itemId,
+      itemName: itemName || undefined,
+      status: 'created',
+      createdByUserId: current.user.id,
+      createdAt: now,
+      expiresAt: now + expiresInMinutes * 60_000,
+    };
+    store.paymentIntents[digest(token)] = intent;
+    audit('payment_qr_created', { userId: current.user.id, merchantId, paymentId: intent.paymentId });
+    persist();
+    return json(res, 201, {
+      ...publicPaymentIntent(intent),
+      openUrl: `${requestOrigin(req)}/pay/${token}`,
+    });
+  }
+
+  const paymentMatch = url.pathname.match(/^\/api\/payment-intents\/([A-Za-z0-9_-]+)(?:\/(confirm|cancel))?$/);
+  if (paymentMatch) {
+    const [, token, action] = paymentMatch;
+    const intent = store.paymentIntents[digest(token)];
+    if (!intent) return json(res, 404, { error: 'That payment QR is invalid.' });
+    if (intent.status === 'created' && intent.expiresAt <= Date.now()) intent.status = 'expired';
+
+    if (!action && req.method === 'GET') return json(res, 200, publicPaymentIntent(intent));
+
+    if (action === 'confirm' && req.method === 'POST') {
+      if (roleOf(current.user) !== 'customer') {
+        return json(res, 403, { error: 'Sign in with a customer account to pay this request.' });
+      }
+      if (intent.status === 'paid') {
+        if (intent.paidByUserId === current.user.id) return json(res, 200, publicPaymentIntent(intent));
+        return json(res, 409, { error: 'This payment request has already been paid.' });
+      }
+      if (intent.status !== 'created') {
+        return json(res, 409, { error: `This payment request is ${intent.status}.` });
+      }
+      intent.status = 'paid';
+      intent.paidAt = Date.now();
+      intent.paidByUserId = current.user.id;
+      audit('payment_qr_paid', { userId: current.user.id, merchantId: intent.merchantId, paymentId: intent.paymentId });
+      persist();
+      return json(res, 200, publicPaymentIntent(intent));
+    }
+
+    if (action === 'cancel' && req.method === 'POST') {
+      const allowed = current.user.id === intent.createdByUserId || roleOf(current.user) === 'admin';
+      if (!allowed) return json(res, 403, { error: 'Only the merchant that created this QR can cancel it.' });
+      if (intent.status === 'created') {
+        intent.status = 'cancelled';
+        audit('payment_qr_cancelled', { userId: current.user.id, paymentId: intent.paymentId });
+        persist();
+      }
+      return json(res, 200, publicPaymentIntent(intent));
+    }
   }
 
   if (url.pathname === '/api/voucher' && req.method === 'POST') {

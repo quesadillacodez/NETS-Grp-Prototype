@@ -294,7 +294,6 @@ function VoucherDetail({ redemption, error, onUse, onClose }: {
   const instantCashback = status === 'applied';
   const daysLeft = daysUntilExpiry(redemption.expiresAt);
   const expiringSoon = status === 'active' && daysLeft !== null && daysLeft <= 7;
-
   return (
     <OverlaySheet onClose={onClose}>
       <div className="px-5 pb-8 text-center">
@@ -311,7 +310,7 @@ function VoucherDetail({ redemption, error, onUse, onClose }: {
         <p className="mt-1 text-xs text-muted-foreground">
           {instantCashback
             ? 'Cashback has been credited directly to your wallet.'
-            : 'Present this prototype voucher code to the merchant.'}
+            : 'Present this scannable, single-use QR to the participating merchant.'}
         </p>
 
         <div className="mt-4 divide-y divide-border rounded-2xl border border-border px-3 text-left">
@@ -365,7 +364,7 @@ function VoucherDetail({ redemption, error, onUse, onClose }: {
           ) : (
             <button
               onClick={onUse}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white"
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white"
             >
               <Check size={17} aria-hidden="true" /> Use now — mark as used
             </button>
@@ -1080,8 +1079,8 @@ export function RewardsPage() {
           <VoucherDetail
             redemption={selectedVoucher}
             error={voucherError}
-            onClose={() => { setSelectedVoucher(null); setVoucherError(null); }}
             onUse={useVoucher}
+            onClose={() => { setSelectedVoucher(null); setVoucherError(null); }}
           />
         )}
       </AnimatePresence>

@@ -16,6 +16,8 @@ import {
   type QuestSignal,
 } from './questStorage';
 import { daysUntil, groupExpiringXP } from './xpExpiryScheduler';
+import { encodeQr, qrPath } from './qrCode';
+import { voucherScanUrl } from './voucherLink';
 import { effectiveBonus, isCampaignActive, type Merchant } from './merchantStorage';
 
 describe('splitAmountExactly', () => {
@@ -515,5 +517,67 @@ describe('XP expiry warnings', () => {
       { remaining: 20, expiresAt: inDays(1) },
     ], NOW);
     expect(groups.map(group => group.xp)).toEqual([20, 10]);
+  });
+});
+
+describe('QR encoding', () => {
+  // A QR that does not decode is worse than no QR at all, so these assert the
+  // structure a scanner depends on. Round-trip decoding is covered separately
+  // against an independent decoder.
+  const modulesOf = (text: string) => encodeQr(text);
+
+  it('sizes the symbol to the payload', () => {
+    // size = 17 + 4 x version, so version 1 is 21x21.
+    expect(modulesOf('XP-000001').length).toBe(21);
+    expect(modulesOf('https://nets.example.sg/v/XP-AB12CD').length).toBe(29); // version 3
+    expect(modulesOf('x'.repeat(200)).length).toBe(57); // version 10
+  });
+
+  it('places the three finder patterns', () => {
+    const m = modulesOf('https://nets.example.sg/v/XP-AB12CD');
+    const n = m.length;
+    // Each finder is a dark 7x7 ring with a dark 3x3 core and a light ring between.
+    for (const [top, left] of [[0, 0], [0, n - 7], [n - 7, 0]] as const) {
+      expect(m[top][left]).toBe(true);          // outer corner
+      expect(m[top + 1][left + 1]).toBe(false); // light ring
+      expect(m[top + 3][left + 3]).toBe(true);  // core
+    }
+  });
+
+  it('draws the timing patterns and the dark module', () => {
+    const m = modulesOf('XP-000001');
+    for (let i = 8; i < m.length - 8; i += 1) {
+      expect(m[6][i]).toBe(i % 2 === 0);
+      expect(m[i][6]).toBe(i % 2 === 0);
+    }
+    expect(m[m.length - 8][8]).toBe(true);
+  });
+
+  it('is deterministic for the same payload', () => {
+    expect(modulesOf('XP-QWERTY')).toEqual(modulesOf('XP-QWERTY'));
+  });
+
+  it('refuses a payload it cannot encode rather than truncating it', () => {
+    expect(() => encodeQr('x'.repeat(400))).toThrow(/too long/i);
+  });
+
+  it('renders a path with one subpath per dark module', () => {
+    const m = modulesOf('XP-000001');
+    const dark = m.flat().filter(Boolean).length;
+    expect(qrPath(m).match(/M/g)?.length).toBe(dark);
+  });
+});
+
+describe('voucher scan links', () => {
+  it('carries only the reference code, not the reward details', () => {
+    // The scan screen looks everything else up, so a code cannot be edited into
+    // a voucher for a different reward or a larger amount.
+    const url = voucherScanUrl('XP-AB12CD');
+    expect(url.endsWith('/v/XP-AB12CD')).toBe(true);
+    expect(url.split('/v/')[1]).toBe('XP-AB12CD');
+  });
+
+  it('escapes a code so it cannot alter the path', () => {
+    expect(voucherScanUrl('XP-A/B?c=1')).toContain('/v/XP-A%2FB%3Fc%3D1');
   });
 });

@@ -32,6 +32,8 @@ import {
   type RewardRedemption,
 } from '../utils/rewardStorage';
 import { currentStreak, dayKey, evaluateDay, getQuestSignals } from '../utils/questStorage';
+import { QRCode } from '../components/QRCode';
+import { voucherScanUrl } from '../utils/voucherLink';
 import { getCurrentUser } from '../utils/userStorage';
 import {
   DEFAULT_NEARBY_RADIUS_KM, byDistance, getUserArea, isWithinRadius, proximityTo,
@@ -168,12 +170,12 @@ function VoucherCode({ redemption, muted }: { redemption: RewardRedemption; mute
     );
   }
   return (
-    <div className={`mx-auto my-5 grid h-44 w-44 place-items-center rounded-3xl border-8 border-[#1e2a4a] bg-white p-3 ${muted ? 'opacity-40 grayscale' : ''}`}>
-      <div className="grid grid-cols-7 gap-1" role="img" aria-label={`Voucher code ${redemption.refCode}`}>
-        {Array.from({ length: 49 }).map((_, index) => (
-          <div key={index} className={`h-3 w-3 ${((index * 7 + redemption.id * 3) % 5) < 2 ? 'bg-[#1e2a4a]' : 'bg-white'}`} />
-        ))}
-      </div>
+    <div className={`mx-auto my-5 grid h-44 w-44 place-items-center rounded-3xl border-8 border-[#1e2a4a] bg-white ${muted ? 'opacity-40 grayscale' : ''}`}>
+      <QRCode
+        value={voucherScanUrl(redemption.refCode)}
+        size={140}
+        label={`Scannable voucher code ${redemption.refCode}`}
+      />
     </div>
   );
 }

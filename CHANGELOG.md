@@ -5,6 +5,28 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## A voucher QR that actually scans
+
+The voucher "QR" was a 7x7 grid of pseudo-random squares — it read as a QR code
+on a slide, but no scanner could do anything with it, and the voucher could only
+ever be redeemed by the customer tapping "mark as used" on their own phone.
+
+`qrCode.ts` generates real QR symbols: byte mode, error-correction level M,
+versions 1–10, with the mask chosen by the specified penalty rules rather than
+fixed. The output is verified by decoding it with an independent decoder, which
+is how a bug in the format-information placement was caught — it was writing
+over the dark module, and every symbol failed to decode until it was fixed.
+
+Scanning a voucher opens `/v/:refCode`. That route is public, because the device
+reading the code at a counter is not signed in as the customer holding it. It
+looks the reference code up against the rewards record, marks the voucher used,
+and shows the reward, the merchant, the XP it cost and its dates — all read back
+from the record. The QR carries nothing but the reference code, so a code cannot
+be edited into a voucher for a different reward or a larger amount. A code that
+is unknown, already used or expired says so instead of showing a success screen.
+
+---
+
 ## Bounding the XP economy, and warning before XP is lost
 
 Two consequences of the XP engine, addressed.

@@ -49,9 +49,8 @@ test.describe('Redeeming a reward', () => {
     await expect(page.getByText('Active', { exact: true }).last()).toBeVisible();
     await expect(page.getByText('Expires', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: /Find NYP Campus Food Court/ })).toBeVisible();
-    await expect(page.getByRole('img', { name: /Live voucher QR/ })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Open QR link' })).toHaveAttribute('href', /\/voucher\//);
-    await expect(page.getByText(/merchant scans this QR/)).toBeVisible();
+    await expect(page.getByRole('img', { name: /Scannable voucher code/ })).toBeVisible();
+    await expect(page.getByText(/Present this scannable, single-use QR/)).toBeVisible();
     await page.getByRole('button', { name: 'Close' }).click();
 
     // The redemption history keeps a permanent record of it.

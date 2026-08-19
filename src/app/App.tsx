@@ -58,6 +58,7 @@ const RewardsPage = lazyPage(() => import('./pages/RewardsPage').then(m => ({ de
 const XPBreakdownPage = lazyPage(() => import('./pages/XPBreakdownPage').then(m => ({ default: m.XPBreakdownPage })));
 const QuestsPage = lazyPage(() => import('./pages/QuestsPage').then(m => ({ default: m.QuestsPage })));
 const MerchantAnalyticsPage = lazyPage(() => import('./pages/MerchantAnalyticsPage').then(m => ({ default: m.MerchantAnalyticsPage })));
+const VoucherScanPage = lazyPage(() => import('./pages/VoucherScanPage').then(m => ({ default: m.VoucherScanPage })));
 const WrappedPage = lazyPage(() => import('./pages/WrappedPage').then(m => ({ default: m.WrappedPage })));
 const WrappedComparePage = lazyPage(() => import('./pages/WrappedComparePage').then(m => ({ default: m.WrappedComparePage })));
 const SpendingDashboardPage = lazyPage(() => import('./pages/SpendingDashboardPage').then(m => ({ default: m.SpendingDashboardPage })));
@@ -75,7 +76,6 @@ const MerchantPortalPage = lazyPage(() => import('./pages/MerchantPortalPage').t
 const DemoControlsPage = lazyPage(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
 const DatabaseExplorerPage = lazyPage(() => import('./pages/DatabaseExplorerPage').then(m => ({ default: m.DatabaseExplorerPage })));
 const PaymentRequestPage = lazyPage(() => import('./pages/PaymentRequestPage').then(m => ({ default: m.PaymentRequestPage })));
-const VoucherRedeemPage = lazyPage(() => import('./pages/VoucherRedeemPage').then(m => ({ default: m.VoucherRedeemPage })));
 
 import './utils/autoReminderScheduler';
 import './utils/voucherExpiryScheduler';
@@ -121,7 +121,6 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/database', Page: DatabaseExplorerPage },
   { path: '/merchant', Page: MerchantPortalPage },
   { path: '/pay/:token', Page: PaymentRequestPage },
-  { path: '/voucher/:token', Page: VoucherRedeemPage },
 ];
 
 function PageLoading() {
@@ -140,6 +139,20 @@ const router = createBrowserRouter([
         <ErrorBoundary>
           <Suspense fallback={<PageLoading />}>
             <LoginPage />
+          </Suspense>
+        </ErrorBoundary>
+      </MobileFrame>
+    ),
+  },
+  {
+    // Public: a voucher is scanned at the counter, so the device reading it is
+    // not signed in as the customer who holds it.
+    path: '/v/:refCode',
+    element: (
+      <MobileFrame requiresAuth={false}>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoading />}>
+            <VoucherScanPage />
           </Suspense>
         </ErrorBoundary>
       </MobileFrame>

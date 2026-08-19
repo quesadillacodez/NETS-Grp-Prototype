@@ -30,6 +30,13 @@ export interface DemoScenarioSummary {
   hangouts: number;
 }
 
+/**
+ * XP the demo account carries in from before the scenario window. Tuned so
+ * Alex's lifetime and spendable balances both sit just above the 10,000 XP
+ * top tier, which is what the rewards walkthrough demonstrates.
+ */
+const DEMO_XP_CARRYOVER = 6100;
+
 const ALEX = '1';
 const SARAH = '2';
 const MIKE = '3';
@@ -71,6 +78,7 @@ export function clearActivityData(): void {
   `);
   // Let the one-off demo history seed run again on the next reload.
   run("DELETE FROM app_meta WHERE key IN ('seeded-demo-history', 'user-cleared-fresh')");
+  run("DELETE FROM app_meta WHERE key LIKE 'demo-xp-carryover:%'");
 
   window.dispatchEvent(new CustomEvent('transactionsUpdated'));
   window.dispatchEvent(new CustomEvent('remindersUpdated'));
@@ -101,6 +109,14 @@ export function loadPresentationScenario(): DemoScenarioSummary {
   const users = getAllUsers();
   const sarah = users.find(user => user.id === SARAH);
   const mike = users.find(user => user.id === MIKE);
+
+  // Alex is presented as a long-standing customer, so he does not start from
+  // zero XP. The figure is stated once here rather than manufactured out of
+  // months of invented transactions, and it lands him just past the top tier.
+  run(
+    'INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)',
+    [`demo-xp-carryover:${ALEX}`, String(DEMO_XP_CARRYOVER)],
+  );
 
   // ── Alex's own spending, spread across categories and weeks ──
   const purchases: { name: string; amount: number; category: string; days: number }[] = [

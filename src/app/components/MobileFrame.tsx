@@ -15,17 +15,13 @@ interface MobileFrameProps {
 const ROLE_HOME = { admin: '/admin', merchant: '/merchant', customer: '/' } as const;
 
 const ROLE_ALLOWED: Record<keyof typeof ROLE_HOME, string[] | null> = {
-  admin: ['/admin', '/manage-merchants', '/merchant-analytics', '/database', '/voucher/'],
-  merchant: ['/merchant', '/voucher/'],
+  admin: ['/admin', '/manage-merchants', '/merchant-analytics', '/database'],
+  merchant: ['/merchant'],
   // Customers may go anywhere that is not somebody else's portal.
   customer: null,
 };
 
 const PORTAL_PATHS = ['/admin', '/manage-merchants', '/merchant-analytics', '/merchant', '/database'];
-
-function pathAllowed(path: string, allowed: string[]): boolean {
-  return allowed.some(candidate => candidate.endsWith('/') ? path.startsWith(candidate) : path === candidate);
-}
 
 function RoleRedirectGuard() {
   const navigate = useNavigate();
@@ -39,7 +35,7 @@ function RoleRedirectGuard() {
 
   if (allowed) {
     // A portal account outside its own pages goes back to its portal.
-    if (!pathAllowed(path, allowed)) queueMicrotask(() => navigate(ROLE_HOME[role], { replace: true }));
+    if (!allowed.includes(path)) queueMicrotask(() => navigate(ROLE_HOME[role], { replace: true }));
   } else if (PORTAL_PATHS.includes(path)) {
     // A customer who ended up on a portal page (e.g. after switching account
     // from inside one) goes home.

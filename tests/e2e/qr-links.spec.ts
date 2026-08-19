@@ -42,7 +42,7 @@ test.describe('Live QR links', () => {
     await expect(page.getByText('Purchase').first()).toBeVisible();
   });
 
-  test('a customer voucher QR is redeemed by the matching merchant once', async ({ page }) => {
+  test('a customer voucher QR opens a public verification page and works once', async ({ page }) => {
     await signInAsCustomer(page, USERS.alex);
     await tapNav(page, 'Rewards');
     await page.getByRole('button', { name: 'Store', exact: true }).click();
@@ -50,31 +50,20 @@ test.describe('Live QR links', () => {
     await page.getByRole('button', { name: 'Confirm redemption' }).click();
     await page.getByRole('button', { name: 'View voucher' }).click();
 
-    const voucherQr = page.getByRole('img', { name: /Live voucher QR/ });
+    const voucherQr = page.getByRole('img', { name: /Scannable voucher code/ });
     await expect(voucherQr).toBeVisible();
-    const voucherUrl = await page.getByRole('link', { name: 'Open QR link' }).getAttribute('href');
-    expect(voucherUrl).toMatch(/\/voucher\/[A-Za-z0-9_-]+$/);
+    const refCode = await page.getByRole('paragraph').filter({ hasText: /^XP-[A-Z0-9]{6}$/ }).textContent();
+    expect(refCode).toMatch(/^XP-[A-Z0-9]{6}$/);
+    await expect.poll(async () => (await page.request.get(`/api/voucher/${refCode}`)).ok()).toBe(true);
 
     await page.getByRole('button', { name: 'Close' }).click();
     await signOut(page);
-    await signInAsMerchant(page, USERS.kopitiam);
-    await page.goto(voucherUrl!);
+    await page.goto(`/v/${refCode}`);
+    await expect(page.getByRole('heading', { name: 'Voucher redeemed' })).toBeVisible();
+    await expect(page.getByText('This code cannot be used again.')).toBeVisible();
 
-    await expect(page.getByRole('heading', { name: '$3 Coffee Voucher' })).toBeVisible();
-    await expect(page.getByText('Merchant verification')).toBeVisible();
-    await page.getByRole('button', { name: 'Redeem voucher' }).click();
-    await expect(page.getByText('Voucher redeemed successfully')).toBeVisible();
-
-    const status = await page.request.get(`/api/voucher-claims/${tokenFrom(voucherUrl!)}`);
-    expect(status.ok()).toBeTruthy();
-    expect((await status.json()).status).toBe('used');
-
-    await page.getByRole('button', { name: 'Done' }).click();
-    await signOutOfMerchant(page);
-    await signInAsCustomer(page, USERS.alex);
-    await tapNav(page, 'Rewards');
-    await page.getByRole('button', { name: 'Wallet', exact: true }).click();
-    await page.getByRole('button', { name: /\$3 Coffee Voucher/ }).click();
-    await expect(page.getByText('Voucher already used')).toBeVisible();
+    await page.goto(`/v/${refCode}`);
+    await expect(page.getByRole('heading', { name: 'Not accepted' })).toBeVisible();
+    await expect(page.getByText(/already been used/)).toBeVisible();
   });
 });

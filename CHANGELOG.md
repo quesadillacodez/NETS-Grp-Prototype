@@ -5,6 +5,62 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## The split mission fired on any payment, and Alex started below the top tier
+
+Two things found by exercising the missions in the running app rather than
+only in tests.
+
+**"Split the bill" completed whenever anyone paid for anything.** The signal was
+a transaction carrying a `payment_id` — but that is the idempotency key written
+on *every* payment, not a marker of a split. Buying a kopi on your own ticked
+the mission. Splits are now read from the bills the user is owed on, which is
+what a split actually creates. Verified both ways round: a plain QR payment no
+longer completes it, and the seeded Din Tai Fung split still does.
+
+**The demo account started just short of the top tier.** Alex is presented as a
+long-standing customer, but the scenario's four weeks of activity left him at
+Heartland Insider, so the walkthrough could not show the top tier or the 1.3x
+earn rate. The scenario now carries in a stated XP balance from before its
+window, which puts lifetime and spendable both just past 10,000. It is one
+labelled grant in the ledger — "Earlier NETS activity" — rather than months of
+invented transactions manufactured to reach the same number, and it is written
+only by the presentation scenario, so a real account never has one.
+
+---
+
+## A voucher QR that actually scans — `5ec3ce3`, `1a8716c`
+
+The voucher "QR" was a 7x7 grid of pseudo-random squares — it read as a QR code
+on a slide, but no scanner could do anything with it, and the voucher could only
+ever be redeemed by the customer tapping "mark as used" on their own phone.
+
+`qrCode.ts` generates real QR symbols: byte mode, error-correction level M,
+versions 1–10, with the mask chosen by the specified penalty rules rather than
+fixed. The output is verified by decoding it with an independent decoder, which
+is how a bug in the format-information placement was caught — it was writing
+over the dark module, and every symbol failed to decode until it was fixed.
+
+Scanning a voucher opens `/v/:refCode`. That route is public, because the device
+reading the code at a counter is not signed in as the customer holding it. It
+looks the reference code up against the rewards record, marks the voucher used,
+and shows the reward, the merchant, the XP it cost and its dates — all read back
+from the record. The QR carries nothing but the reference code, so a code cannot
+be edited into a voucher for a different reward or a larger amount. A code that
+is unknown, already used or expired says so instead of showing a success screen.
+
+The QR points at the running origin, so it resolves to the deployed site rather
+than to a developer's machine. That alone was not enough to make a scan work,
+though: the synchronized database is only served to an authenticated session, so
+a phone scanning the code — which is not signed in as the customer holding the
+voucher — had nothing to look the code up in. Redemptions are now also published
+to a small server-side index keyed by reference code, and the scan screen
+verifies against that, falling back to the local record for a same-device scan.
+The index holds only what a merchant needs to honour the voucher: no user
+identity, no wallet, no transaction history. Verified by scanning from a second
+browser with no cookies at all.
+
+---
+
 ## Bounding the XP economy, and warning before XP is lost
 
 Two consequences of the XP engine, addressed.

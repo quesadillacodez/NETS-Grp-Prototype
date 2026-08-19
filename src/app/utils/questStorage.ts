@@ -180,14 +180,10 @@ export function getLoginSignals(userId: string): QuestSignal[] {
     .map(row => ({ at: Number(row.at), kind: 'login' as const }));
 }
 
-/**
- * Turns the user's real transactions into quest signals. Split payments are
- * recognised by the payment flow's shared `payment_id`, so a mission cannot be
- * completed by anything other than genuine activity.
- */
+/** Turns the user's real purchases into payment signals. */
 export function getTransactionSignals(userId: string): QuestSignal[] {
   const rows = query(
-    `SELECT name, amount, category, created_at, kind, status, payment_id
+    `SELECT name, amount, category, created_at, kind, status
        FROM transactions
       WHERE user_id = ? AND amount < 0`,
     [userId],
@@ -197,11 +193,27 @@ export function getTransactionSignals(userId: string): QuestSignal[] {
     const at = Number(row.created_at ?? 0);
     if (!at) continue;
     signals.push({ at, kind: isHeartlandName(String(row.name)) ? 'heartland-payment' : 'payment' });
-    if (row.payment_id != null) signals.push({ at, kind: 'split' });
+  }
+  return signals;
+}
+
+/**
+ * Splits the user started, taken from the bills they are owed on.
+ *
+ * Not from the transaction's `payment_id`: that is an idempotency key carried
+ * by every payment, so keying off it completed "Split the bill" whenever
+ * somebody paid for a kopi on their own.
+ */
+export function getSplitSignals(userId: string): QuestSignal[] {
+  const signals: QuestSignal[] = [];
+  for (const row of query('SELECT created_date, date FROM reminders WHERE from_user_id = ?', [userId])) {
+    const raw = row.created_date ?? row.date;
+    const at = raw ? Date.parse(String(raw)) : NaN;
+    if (!Number.isNaN(at)) signals.push({ at, kind: 'split' });
   }
   return signals;
 }
 
 export function getQuestSignals(userId: string): QuestSignal[] {
-  return [...getTransactionSignals(userId), ...getLoginSignals(userId)];
+  return [...getTransactionSignals(userId), ...getSplitSignals(userId), ...getLoginSignals(userId)];
 }

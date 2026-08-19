@@ -5,6 +5,7 @@ import {
   evaluateDay, getQuestSignals, dayKey, weekKey, WEEKLY_MISSION_XP_CAP, type QuestSignal,
 } from './questStorage';
 import { buildLedger, type XPLedger, type XPLedgerInput } from './xpLedger';
+import { registerVoucher } from './voucherRegistry';
 
 export type RewardCategory = 'Cashback' | 'Vouchers' | 'Partner Deals';
 
@@ -356,21 +357,25 @@ export function buildQuestEntries(signals: QuestSignal[]): XPHistoryEntry[] {
   return entries;
 }
 
+function rowToRedemption(row: Record<string, any>): RewardRedemption {
+  return {
+    id: Number(row.id),
+    userId: String(row.user_id),
+    rewardId: Number(row.reward_id),
+    title: String(row.title),
+    merchant: String(row.merchant),
+    xpCost: Number(row.xp_cost),
+    refCode: String(row.ref_code),
+    redeemedAt: Number(row.redeemed_at),
+    used: Number(row.used) === 1,
+    expiresAt: Number(row.expires_at ?? 0),
+    usedAt: row.used_at == null ? undefined : Number(row.used_at),
+  };
+}
+
 export function getRewardRedemptions(userId: string): RewardRedemption[] {
   return query('SELECT * FROM reward_redemptions WHERE user_id = ? ORDER BY redeemed_at DESC', [userId])
-    .map(row => ({
-      id: Number(row.id),
-      userId: String(row.user_id),
-      rewardId: Number(row.reward_id),
-      title: String(row.title),
-      merchant: String(row.merchant),
-      xpCost: Number(row.xp_cost),
-      refCode: String(row.ref_code),
-      redeemedAt: Number(row.redeemed_at),
-      used: Number(row.used) === 1,
-      expiresAt: Number(row.expires_at ?? 0),
-      usedAt: row.used_at == null ? undefined : Number(row.used_at),
-    }));
+    .map(rowToRedemption);
 }
 
 export function getXPHistory(userId: string): XPHistoryEntry[] {
@@ -431,8 +436,26 @@ export function getXPHistory(userId: string): XPHistoryEntry[] {
     createdAt: 1,
     neverExpires: true,
   };
+  // XP carried over from before the demo window. Only the presentation
+  // scenario writes this, so a real account never has one; it exists because a
+  // long-standing customer would not start the demo from zero, and stating it
+  // as one grant is more honest than inventing months of transactions to reach
+  // the same figure.
+  const carried = query('SELECT value FROM app_meta WHERE key = ?', [`demo-xp-carryover:${userId}`]);
+  const carryOver: XPHistoryEntry[] = carried.length && Number(carried[0].value) > 0
+    ? [{
+        id: 'carry-over',
+        title: 'Earlier NETS activity',
+        subtitle: 'XP carried into this account',
+        xp: Number(carried[0].value),
+        type: 'earn',
+        createdAt: 2,
+        neverExpires: true,
+      }]
+    : [];
+
   const quests = buildQuestEntries(getQuestSignals(userId));
-  const withTiers = applyTierMultipliers([welcome, ...earned, ...quests]);
+  const withTiers = applyTierMultipliers([welcome, ...carryOver, ...earned, ...quests]);
   return [...withTiers, ...spent, ...refunds].sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -514,6 +537,9 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
       window.dispatchEvent(new CustomEvent('transactionsUpdated'));
     }
   }
+  // Publish it so the voucher can be verified by a phone scanning the QR, which
+  // is not signed in as this customer and cannot read their database.
+  registerVoucher(redemption);
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
   return redemption;
 }
@@ -522,6 +548,55 @@ export function redeemReward(userId: string, reward: Reward): RewardRedemption |
  * Mark a voucher as used at the merchant. An expired voucher is refused, so the
  * status shown on the voucher and what the app allows can never disagree.
  */
+/**
+ * Finds a redemption by its printed reference code, across all users.
+ *
+ * The voucher QR is scanned at the counter, so the lookup cannot assume the
+ * scanning device is signed in as the customer who holds the voucher — the
+ * reference code is the only thing the scanner has.
+ */
+export function getRedemptionByRefCode(refCode: string): RewardRedemption | null {
+  const code = refCode.trim().toUpperCase();
+  if (!code) return null;
+  const rows = query(
+    'SELECT * FROM reward_redemptions WHERE UPPER(ref_code) = ? LIMIT 1',
+    [code],
+  );
+  return rows.length ? rowToRedemption(rows[0]) : null;
+}
+
+/**
+ * Marks a voucher used from a scan, identified by reference code rather than
+ * by id and owner. Returns the redemption either way so the scan screen can
+ * show what the voucher was, even when it cannot be accepted.
+ */
+export function redeemByRefCode(refCode: string, now = Date.now()): {
+  ok: boolean;
+  reason?: string;
+  redemption: RewardRedemption | null;
+} {
+  const redemption = getRedemptionByRefCode(refCode);
+  if (!redemption) return { ok: false, reason: 'No voucher matches this code.', redemption: null };
+
+  const status = getRedemptionStatus(redemption, now);
+  if (status === 'applied') {
+    return { ok: false, reason: 'This is wallet cashback, already credited.', redemption };
+  }
+  if (status === 'expired') {
+    return { ok: false, reason: `This voucher expired on ${formatExpiry(redemption.expiresAt)}.`, redemption };
+  }
+  if (status === 'used') {
+    return { ok: false, reason: 'This voucher has already been used.', redemption };
+  }
+
+  run(
+    'UPDATE reward_redemptions SET used = 1, used_at = ? WHERE id = ?',
+    [now, redemption.id],
+  );
+  window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
+  return { ok: true, redemption: { ...redemption, used: true, usedAt: now } };
+}
+
 export function markRewardUsed(redemptionId: number, userId: string): { ok: boolean; reason?: string } {
   const redemption = getRewardRedemptions(userId).find(item => item.id === redemptionId);
   if (!redemption) return { ok: false, reason: 'That voucher could not be found.' };

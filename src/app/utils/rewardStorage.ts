@@ -5,7 +5,7 @@ import {
   evaluateDay, getQuestSignals, dayKey, weekKey, WEEKLY_MISSION_XP_CAP, type QuestSignal,
 } from './questStorage';
 import { buildLedger, type XPLedger, type XPLedgerInput } from './xpLedger';
-import { registerVoucher } from './voucherRegistry';
+import { publishVouchers, registerVoucher } from './voucherRegistry';
 
 export type RewardCategory = 'Cashback' | 'Vouchers' | 'Partner Deals';
 
@@ -378,6 +378,22 @@ export function getRewardRedemptions(userId: string): RewardRedemption[] {
     .map(rowToRedemption);
 }
 
+/**
+ * Publishes every voucher a user holds to the server index.
+ *
+ * Run on startup and whenever the rewards wallet is opened — the screen that
+ * renders the QR — so a code is verifiable from another device before anyone
+ * can scan it. Registering only at the moment of redemption is not enough: the
+ * seeded demo vouchers are inserted straight into SQLite, and a redemption made
+ * while offline gets no second chance.
+ *
+ * Only the given user's vouchers are sent. The index needs no one else's, and
+ * the device publishing is the one whose voucher is about to be presented.
+ */
+export async function syncVoucherIndex(userId: string): Promise<boolean> {
+  return publishVouchers(getRewardRedemptions(userId));
+}
+
 export function getXPHistory(userId: string): XPHistoryEntry[] {
   const transactions = query(
     `SELECT id, name, amount, date, created_at, kind, status
@@ -593,6 +609,9 @@ export function redeemByRefCode(refCode: string, now = Date.now()): {
     'UPDATE reward_redemptions SET used = 1, used_at = ? WHERE id = ?',
     [now, redemption.id],
   );
+  // A scan honoured against the local record still has to reach the index, so
+  // the next device to scan the same code sees it spent.
+  void publishVouchers([{ ...redemption, used: true, usedAt: now }]);
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
   return { ok: true, redemption: { ...redemption, used: true, usedAt: now } };
 }
@@ -607,10 +626,14 @@ export function markRewardUsed(redemptionId: number, userId: string): { ok: bool
   }
   if (status === 'used') return { ok: false, reason: 'This voucher has already been used.' };
 
+  const usedAt = Date.now();
   run(
     'UPDATE reward_redemptions SET used = 1, used_at = ? WHERE id = ? AND user_id = ?',
-    [Date.now(), redemptionId, userId],
+    [usedAt, redemptionId, userId],
   );
+  // Carry the spend to the index too, or the same code would still be honoured
+  // by a merchant scanning the QR after the customer marked it used in-app.
+  void publishVouchers([{ ...redemption, used: true, usedAt }]);
   window.dispatchEvent(new CustomEvent('rewardRedemptionsUpdated'));
   return { ok: true };
 }

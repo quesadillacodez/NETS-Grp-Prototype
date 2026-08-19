@@ -5,6 +5,55 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Every voucher verifiable from any device, not just the one that issued it
+
+The previous entry published redemptions to a server index so a merchant's phone
+could verify a scan. It published them at the moment of redemption and nowhere
+else, which left most of the wallet invisible to the counter.
+
+Three kinds of voucher were never in the index. The seeded demo vouchers are
+written straight into SQLite by the presentation reset, so they never pass
+through `redeemReward` — `XP-DEMO01` to `XP-DEMO05`, the ones a demo actually
+shows, were the worst affected. Anything redeemed while the network was down
+lost its single fire-and-forget attempt. Anything redeemed before the index
+existed was never offered to it. Scanning any of them returned 404 from the
+server, fell through to the scanning device's own database, found nothing there
+either, and told the customer their voucher did not exist. Confirmed against a
+running server: `GET /api/voucher/XP-DEMO04` answered 404 on a freshly seeded
+demo.
+
+Publishing is now a sweep of the whole wallet rather than a single event. It
+runs at startup, whenever the rewards wallet is opened — the screen that renders
+the QR, so a code is in the index before anything can point a camera at it — and
+still at redemption, now retried three times instead of fired once. `POST
+/api/vouchers` takes the batch in one request.
+
+Reconciliation is forward-only. A device republishes its whole wallet on every
+start, so a phone that has been offline since before a voucher was spent keeps
+offering `used: false` for it; honouring that would un-spend the voucher and let
+it be redeemed twice. A voucher already marked used in the index stays used, and
+the only transition a publish can cause is unused to used.
+
+Two related holes closed. Marking a voucher used in the app now reaches the
+index, so a customer who taps "Use now" cannot then have the same code honoured
+at a counter. And the demo reset clears the index before republishing the
+reseeded wallet — the seeded codes are fixed strings, so without that a code
+spent in one run of the demo would still read as spent after a reset, and the
+reset would look broken.
+
+The scan screen no longer treats "the server does not know this code" as "the
+server is unreachable". It prefers the index whenever the index holds the code,
+falls back to the local record for a same-device scan, and distinguishes an
+unknown code from a device that is simply offline rather than showing one
+message for both.
+
+Covered by `tests/e2e/voucher-cross-device.spec.ts`, which drives a second
+browser context — no shared cookies, localStorage or IndexedDB — so a passing
+test cannot be reading the issuing device's local record. Three of its five
+cases fail against the previous code.
+
+---
+
 ## The split mission fired on any payment, and Alex started below the top tier
 
 Two things found by exercising the missions in the running app rather than

@@ -26,6 +26,7 @@ import {
   isCashbackRedemption,
   markRewardUsed,
   redeemReward,
+  syncVoucherIndex,
   type RedemptionStatus,
   type Reward,
   type RewardCategory,
@@ -990,6 +991,12 @@ export function RewardsPage() {
   const refresh = () => { setCurrentUser(getCurrentUser()); setVersion(version => version + 1); };
   useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus', 'locationChanged'], refresh);
   const stats = getXPStats(currentUser.id);
+
+  // This screen is where a voucher QR is shown, so it is the last moment the
+  // code can be published before someone points a camera at it. Covers a wallet
+  // opened after a demo reset, after switching accounts, or on a device whose
+  // startup sweep ran while the network was down.
+  useEffect(() => { void syncVoucherIndex(currentUser.id); }, [currentUser.id]);
 
   const confirmRedemption = () => {
     if (!selectedReward) return;

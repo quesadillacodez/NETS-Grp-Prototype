@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  BarChart3, Clock3, Download, Flame, Lightbulb, LogOut, Megaphone, Plus, Repeat, ShieldCheck,
-  Sparkles, Store, TicketCheck, Trash2, TrendingDown, TrendingUp, UserPlus, Users, Utensils, X, Zap,
+  BarChart3, Check, Clock3, Copy, Download, ExternalLink, Flame, Lightbulb, LoaderCircle, LogOut,
+  Megaphone, Plus, QrCode, Repeat, ShieldCheck, Sparkles, Store, TicketCheck, Trash2, TrendingDown,
+  TrendingUp, UserPlus, Users, Utensils, X, Zap,
 } from 'lucide-react';
 import { getCurrentUser } from '../utils/userStorage';
 import { logout } from '../utils/authStorage';
@@ -18,13 +19,17 @@ import {
   getPromotableRewards, getPromotionReports, type Placement,
 } from '../utils/promotionStorage';
 import { useAppEvents } from '../utils/useAppEvents';
+import { QRCodeImage } from '../components/QRCodeImage';
+import {
+  cancelPaymentIntent, createPaymentIntent, getPaymentIntent, type PaymentIntentCreation,
+} from '../utils/qrApi';
 
 const money = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const percent = (n: number) => `${Math.round(n * 100)}%`;
 
-type MerchantTab = 'today' | 'menu' | 'rewards';
+type MerchantTab = 'today' | 'menu' | 'qr' | 'rewards';
 
 /**
  * The merchant's own view of the app.
@@ -83,8 +88,8 @@ export function MerchantPortalPage() {
         </div>
       </header>
 
-      <nav aria-label="Merchant sections" className="grid flex-shrink-0 grid-cols-3 gap-1.5 border-b border-border bg-white px-4 py-3">
-        {(['today', 'menu', 'rewards'] as const).map(key => (
+      <nav aria-label="Merchant sections" className="grid flex-shrink-0 grid-cols-4 gap-1.5 border-b border-border bg-white px-4 py-3">
+        {(['today', 'menu', 'qr', 'rewards'] as const).map(key => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -104,6 +109,7 @@ export function MerchantPortalPage() {
           />
         )}
         {tab === 'menu' && <MenuView merchantId={merchantId} items={items} tick={tick} onChange={refresh} />}
+        {tab === 'qr' && merchant && <PaymentQRView merchant={merchant} />}
         {tab === 'rewards' && (
           <RewardsView
             merchantName={merchantName} insight={insight} tick={tick}
@@ -111,6 +117,150 @@ export function MerchantPortalPage() {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+function tokenFromUrl(url: string): string {
+  return new URL(url).pathname.split('/').filter(Boolean).pop() ?? '';
+}
+
+function PaymentQRView({ merchant }: { merchant: Merchant }) {
+  const menu = useMemo(() => getMenu(merchant.id).filter(item => item.active), [merchant.id]);
+  const [itemId, setItemId] = useState('');
+  const [amount, setAmount] = useState(merchant.amount.toFixed(2));
+  const [reference, setReference] = useState(merchant.reference ?? '');
+  const [created, setCreated] = useState<PaymentIntentCreation | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const createdUrl = created?.openUrl ?? '';
+  const createdStatus = created?.status;
+  useEffect(() => {
+    if (!createdUrl || createdStatus !== 'created') return;
+    const token = tokenFromUrl(createdUrl);
+    const timer = window.setInterval(() => {
+      void getPaymentIntent(token).then(next => {
+        setCreated(current => current ? { ...current, ...next } : current);
+      }).catch(() => {});
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [createdStatus, createdUrl]);
+
+  const chooseItem = (value: string) => {
+    setItemId(value);
+    const item = menu.find(entry => entry.id === Number(value));
+    if (item) {
+      setAmount(item.price.toFixed(2));
+      setReference(item.name);
+    }
+  };
+
+  const generate = async () => {
+    const parsed = Number(amount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setError('Enter an amount greater than zero.');
+      return;
+    }
+    const item = menu.find(entry => entry.id === Number(itemId));
+    setBusy(true);
+    setError('');
+    setCopied(false);
+    try {
+      setCreated(await createPaymentIntent({
+        merchantId: merchant.id,
+        merchantName: merchant.name,
+        amount: parsed,
+        reference: reference.trim() || undefined,
+        itemId: item?.id,
+        itemName: item?.name,
+        expiresInMinutes: 10,
+      }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The payment QR could not be generated.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (!created) return;
+    try {
+      const next = await cancelPaymentIntent(tokenFromUrl(created.openUrl));
+      setCreated({ ...created, ...next });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The QR could not be cancelled.');
+    }
+  };
+
+  const copy = async () => {
+    if (!created) return;
+    await navigator.clipboard.writeText(created.openUrl);
+    setCopied(true);
+  };
+
+  if (created) {
+    const paid = created.status === 'paid';
+    return (
+      <div className="space-y-4 p-4">
+        <section className={`rounded-3xl p-5 text-center ${paid ? 'bg-success/10' : 'border-2 border-border bg-white'}`}>
+          <div className={`mx-auto grid h-14 w-14 place-items-center rounded-2xl ${paid ? 'bg-success text-white' : 'bg-primary/10 text-primary'}`}>
+            {paid ? <Check size={28} aria-hidden="true" /> : <QrCode size={27} aria-hidden="true" />}
+          </div>
+          <h1 className="mt-3 text-lg font-black">{paid ? 'Payment received' : 'Customer payment QR'}</h1>
+          <p className="mt-1 text-xs text-muted-foreground">{created.itemName || created.reference || 'NETS purchase'}</p>
+          <p className="mt-2 text-3xl font-black text-primary">{money(created.amount)}</p>
+          {!paid && created.status === 'created' && <QRCodeImage value={created.openUrl} label={`Payment QR for ${money(created.amount)} at ${merchant.name}`} />}
+          {paid && <p role="status" className="mt-3 text-sm font-black text-success">The customer completed this payment.</p>}
+          {created.status === 'expired' && <p role="alert" className="mt-3 text-sm font-black text-destructive">This payment QR expired.</p>}
+          {created.status === 'cancelled' && <p role="status" className="mt-3 text-sm font-black text-muted-foreground">This payment QR was cancelled.</p>}
+        </section>
+
+        {created.status === 'created' && (
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={copy} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-border text-xs font-black"><Copy size={15} />{copied ? 'Copied' : 'Copy link'}</button>
+            <a href={created.openUrl} target="_blank" rel="noreferrer noopener" className="flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-border text-xs font-black"><ExternalLink size={15} />Open link</a>
+            <button onClick={cancel} className="col-span-2 min-h-11 rounded-xl bg-destructive/10 text-xs font-black text-destructive">Cancel QR</button>
+          </div>
+        )}
+
+        <button onClick={() => { setCreated(null); setCopied(false); setError(''); }} className="min-h-12 w-full rounded-xl bg-primary text-xs font-black text-white">Create another payment QR</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 p-4">
+      <section className="rounded-3xl bg-[#0f2c45] p-5 text-white">
+        <QrCode size={28} aria-hidden="true" />
+        <h1 className="mt-3 text-xl font-black">Create a payment QR</h1>
+        <p className="mt-1 text-xs leading-relaxed text-white/70">Customers scan with any phone camera. The secure link opens the exact merchant, item and amount inside NETS.</p>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border-2 border-border bg-white p-4">
+        {menu.length > 0 && (
+          <div>
+            <label htmlFor="qr-menu-item" className="mb-1 block text-xs font-bold text-muted-foreground">Menu item</label>
+            <select id="qr-menu-item" value={itemId} onChange={event => chooseItem(event.target.value)} className="min-h-11 w-full rounded-xl bg-secondary px-3 text-xs outline-none">
+              <option value="">Custom payment</option>
+              {menu.map(item => <option key={item.id} value={item.id}>{item.name} · {money(item.price)}</option>)}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor="qr-payment-amount" className="mb-1 block text-xs font-bold text-muted-foreground">Amount (SGD)</label>
+          <input id="qr-payment-amount" value={amount} onChange={event => setAmount(event.target.value)} inputMode="decimal" className="min-h-11 w-full rounded-xl bg-secondary px-3 text-sm font-black outline-none" />
+        </div>
+        <div>
+          <label htmlFor="qr-payment-reference" className="mb-1 block text-xs font-bold text-muted-foreground">Order reference</label>
+          <input id="qr-payment-reference" value={reference} onChange={event => setReference(event.target.value)} maxLength={120} placeholder="e.g. Table 5" className="min-h-11 w-full rounded-xl bg-secondary px-3 text-xs outline-none" />
+        </div>
+        {error && <p role="alert" className="rounded-xl bg-destructive/10 p-3 text-xs font-bold text-destructive">{error}</p>}
+        <button onClick={generate} disabled={busy} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-black text-white disabled:opacity-60">
+          {busy ? <><LoaderCircle size={18} className="animate-spin" /> Generating…</> : <><QrCode size={18} /> Generate live QR</>}
+        </button>
+      </section>
     </div>
   );
 }

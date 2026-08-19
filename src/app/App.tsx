@@ -74,6 +74,8 @@ const HelpSupportPage = lazyPage(() => import('./pages/HelpSupportPage').then(m 
 const MerchantPortalPage = lazyPage(() => import('./pages/MerchantPortalPage').then(m => ({ default: m.MerchantPortalPage })));
 const DemoControlsPage = lazyPage(() => import('./pages/DemoControlsPage').then(m => ({ default: m.DemoControlsPage })));
 const DatabaseExplorerPage = lazyPage(() => import('./pages/DatabaseExplorerPage').then(m => ({ default: m.DatabaseExplorerPage })));
+const PaymentRequestPage = lazyPage(() => import('./pages/PaymentRequestPage').then(m => ({ default: m.PaymentRequestPage })));
+const VoucherRedeemPage = lazyPage(() => import('./pages/VoucherRedeemPage').then(m => ({ default: m.VoucherRedeemPage })));
 
 import './utils/autoReminderScheduler';
 import './utils/voucherExpiryScheduler';
@@ -118,6 +120,8 @@ const routes: { path: string; Page: ComponentType }[] = [
   { path: '/admin', Page: AdminAccessPage },
   { path: '/database', Page: DatabaseExplorerPage },
   { path: '/merchant', Page: MerchantPortalPage },
+  { path: '/pay/:token', Page: PaymentRequestPage },
+  { path: '/voucher/:token', Page: VoucherRedeemPage },
 ];
 
 function PageLoading() {

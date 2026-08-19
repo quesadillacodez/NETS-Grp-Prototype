@@ -34,7 +34,7 @@ test.describe('Redeeming a reward', () => {
     await expect(page.getByText('Cashback earned ·').first()).toBeVisible();
   });
 
-  test('a voucher carries an expiry date, terms and a status that can be used once', async ({ page }) => {
+  test('a voucher carries an expiry date and generates a live merchant QR', async ({ page }) => {
     await signInAsCustomer(page, USERS.alex);
     await tapNav(page, 'Rewards');
 
@@ -49,17 +49,16 @@ test.describe('Redeeming a reward', () => {
     await expect(page.getByText('Active', { exact: true }).last()).toBeVisible();
     await expect(page.getByText('Expires', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: /Find NYP Campus Food Court/ })).toBeVisible();
-
-    await page.getByRole('button', { name: /Use now/ }).click();
-    await expect(page.getByText('Voucher already used').first()).toBeVisible();
-    await expect(page.getByText('Used on').first()).toBeVisible();
+    await expect(page.getByRole('img', { name: /Live voucher QR/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open QR link' })).toHaveAttribute('href', /\/voucher\//);
+    await expect(page.getByText(/merchant scans this QR/)).toBeVisible();
     await page.getByRole('button', { name: 'Close' }).click();
 
     // The redemption history keeps a permanent record of it.
     await page.getByRole('button', { name: 'History', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'XP & Redemption History' })).toBeVisible();
     await expect(page.getByText(/Redemption history \(1\)/)).toBeVisible();
-    await expect(page.getByText('Used').first()).toBeVisible();
+    await expect(page.getByText('Active').first()).toBeVisible();
   });
 
   test('a reward the customer cannot afford is locked rather than redeemable', async ({ page }) => {

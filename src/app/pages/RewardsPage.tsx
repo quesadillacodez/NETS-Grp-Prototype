@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import {
-  AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Flame, Gift, History, LockKeyhole,
-  MapPin, Megaphone, Navigation, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
+  AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Copy, ExternalLink, Flame, Gift, History,
+  LoaderCircle, LockKeyhole, MapPin, Megaphone, Navigation, QrCode, Search, ShoppingBag, Sparkles, Store,
+  TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -24,7 +25,6 @@ import {
   getXPHistory,
   getXPStats,
   isCashbackRedemption,
-  markRewardUsed,
   redeemReward,
   type RedemptionStatus,
   type Reward,
@@ -40,6 +40,10 @@ import { useAppEvents } from '../utils/useAppEvents';
 import { LocationSheet } from '../components/LocationPicker';
 import { getLivePromotions, recordImpressions } from '../utils/promotionStorage';
 import { getRedemptionCounts } from '../utils/merchantInsights';
+import { QRCodeImage } from '../components/QRCodeImage';
+import { createVoucherClaim } from '../utils/qrApi';
+import { getMerchantByName } from '../utils/merchantStorage';
+import { flushSave } from '../utils/db';
 
 type RewardsTab = 'overview' | 'store' | 'wallet' | 'ledger' | 'history';
 
@@ -159,7 +163,12 @@ function RewardDetail({ reward, userId, currentXP, onRedeem, onClose }: {
   );
 }
 
-function VoucherCode({ redemption, muted }: { redemption: RewardRedemption; muted?: boolean }) {
+function VoucherCode({ redemption, muted, qrUrl, loading }: {
+  redemption: RewardRedemption;
+  muted?: boolean;
+  qrUrl?: string;
+  loading?: boolean;
+}) {
   if (isCashbackRedemption(redemption)) {
     return (
       <div className="mx-auto my-5 grid h-28 w-28 place-items-center rounded-full bg-success/10 text-3xl font-black text-success">
@@ -167,13 +176,10 @@ function VoucherCode({ redemption, muted }: { redemption: RewardRedemption; mute
       </div>
     );
   }
+  if (qrUrl) return <QRCodeImage value={qrUrl} label={`Live voucher QR for ${redemption.title}`} muted={muted} />;
   return (
     <div className={`mx-auto my-5 grid h-44 w-44 place-items-center rounded-3xl border-8 border-[#1e2a4a] bg-white p-3 ${muted ? 'opacity-40 grayscale' : ''}`}>
-      <div className="grid grid-cols-7 gap-1" role="img" aria-label={`Voucher code ${redemption.refCode}`}>
-        {Array.from({ length: 49 }).map((_, index) => (
-          <div key={index} className={`h-3 w-3 ${((index * 7 + redemption.id * 3) % 5) < 2 ? 'bg-[#1e2a4a]' : 'bg-white'}`} />
-        ))}
-      </div>
+      {loading ? <LoaderCircle size={30} className="animate-spin text-primary" aria-label="Generating live voucher QR" /> : <QrCode size={58} className="text-muted-foreground" aria-hidden="true" />}
     </div>
   );
 }
@@ -282,16 +288,50 @@ function RedemptionReceipt({ redemption, remainingXP, onViewVoucher, onDone }: {
   );
 }
 
-function VoucherDetail({ redemption, error, onUse, onClose }: {
+function VoucherDetail({ redemption, onClose }: {
   redemption: RewardRedemption;
-  error: string | null;
-  onUse: () => void;
   onClose: () => void;
 }) {
   const status = getRedemptionStatus(redemption);
   const instantCashback = status === 'applied';
   const daysLeft = daysUntilExpiry(redemption.expiresAt);
   const expiringSoon = status === 'active' && daysLeft !== null && daysLeft <= 7;
+  const [qrUrl, setQrUrl] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [qrLoading, setQrLoading] = useState(status === 'active' && !instantCashback);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (status !== 'active' || instantCashback) return;
+    let active = true;
+    setQrLoading(true);
+    void flushSave()
+      .then(() => createVoucherClaim({
+        redemptionId: redemption.id,
+        rewardId: redemption.rewardId,
+        title: redemption.title,
+        merchant: redemption.merchant,
+        merchantId: getMerchantByName(redemption.merchant)?.id,
+        refCode: redemption.refCode,
+        expiresAt: redemption.expiresAt,
+      }))
+      .then(result => {
+        if (active) setQrUrl(result.openUrl);
+      })
+      .catch(reason => {
+        if (active) setQrError(reason instanceof Error ? reason.message : 'The live voucher QR could not be generated.');
+      })
+      .finally(() => {
+        if (active) setQrLoading(false);
+      });
+    return () => { active = false; };
+  }, [instantCashback, redemption, status]);
+
+  const copyLink = async () => {
+    if (!qrUrl) return;
+    await navigator.clipboard.writeText(qrUrl);
+    setCopied(true);
+  };
 
   return (
     <OverlaySheet onClose={onClose}>
@@ -303,13 +343,13 @@ function VoucherDetail({ redemption, error, onUse, onClose }: {
         <h2 className="text-xl font-black">{redemption.title}</h2>
         <div className="mt-2"><StatusBadge status={status} /></div>
 
-        <VoucherCode redemption={redemption} muted={status === 'used' || status === 'expired'} />
+        <VoucherCode redemption={redemption} muted={status === 'used' || status === 'expired'} qrUrl={qrUrl} loading={qrLoading} />
 
         <p className="font-mono text-sm font-black tracking-wider text-primary">{redemption.refCode}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {instantCashback
             ? 'Cashback has been credited directly to your wallet.'
-            : 'Present this prototype voucher code to the merchant.'}
+            : 'Present this live, single-use QR to the participating merchant.'}
         </p>
 
         <div className="mt-4 divide-y divide-border rounded-2xl border border-border px-3 text-left">
@@ -339,9 +379,9 @@ function VoucherDetail({ redemption, error, onUse, onClose }: {
           </p>
         )}
 
-        {error && (
+        {qrError && (
           <p role="alert" className="mt-3 rounded-xl bg-destructive/10 p-2.5 text-[11px] font-bold text-destructive">
-            {error}
+            {qrError}
           </p>
         )}
 
@@ -360,13 +400,14 @@ function VoucherDetail({ redemption, error, onUse, onClose }: {
             <div className="flex items-center justify-center gap-2 rounded-xl bg-destructive/10 py-3 text-sm font-black text-destructive">
               <AlertTriangle size={17} aria-hidden="true" /> Voucher expired
             </div>
+          ) : qrUrl ? (
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={copyLink} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-border text-xs font-black text-foreground"><Copy size={15} />{copied ? 'Copied' : 'Copy link'}</button>
+              <a href={qrUrl} target="_blank" rel="noreferrer noopener" className="flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-border text-xs font-black text-foreground"><ExternalLink size={15} />Open QR link</a>
+              <p className="col-span-2 rounded-xl bg-[#fff8df] p-3 text-[11px] font-bold text-[#7a5a00]">The merchant scans this QR and confirms redemption from their NETS merchant account.</p>
+            </div>
           ) : (
-            <button
-              onClick={onUse}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white"
-            >
-              <Check size={17} aria-hidden="true" /> Use now — mark as used
-            </button>
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-secondary py-3 text-sm font-black text-muted-foreground"><LoaderCircle size={17} className="animate-spin" /> Preparing merchant QR</div>
           )}
 
           {!instantCashback && (
@@ -979,7 +1020,6 @@ export function RewardsPage() {
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedVoucher, setSelectedVoucher] = useState<RewardRedemption | null>(null);
   const [receipt, setReceipt] = useState<RewardRedemption | null>(null);
-  const [voucherError, setVoucherError] = useState<string | null>(null);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showTiers, setShowTiers] = useState(false);
@@ -1002,20 +1042,7 @@ export function RewardsPage() {
   };
 
   const openVoucher = (redemption: RewardRedemption) => {
-    setVoucherError(null);
     setSelectedVoucher(redemption);
-  };
-
-  const useVoucher = () => {
-    if (!selectedVoucher) return;
-    const result = markRewardUsed(selectedVoucher.id, currentUser.id);
-    if (!result.ok) {
-      setVoucherError(result.reason ?? 'That voucher can no longer be used.');
-      return;
-    }
-    setVoucherError(null);
-    setSelectedVoucher({ ...selectedVoucher, used: true, usedAt: Date.now() });
-    refresh();
   };
 
   return (
@@ -1077,9 +1104,7 @@ export function RewardsPage() {
         {selectedVoucher && (
           <VoucherDetail
             redemption={selectedVoucher}
-            error={voucherError}
-            onClose={() => { setSelectedVoucher(null); setVoucherError(null); }}
-            onUse={useVoucher}
+            onClose={() => setSelectedVoucher(null)}
           />
         )}
       </AnimatePresence>

@@ -23,6 +23,7 @@ const MAX_OTP_ATTEMPTS = 5;
 const IP_LOGIN_LIMIT = 30;
 const IP_RECOVERY_LIMIT = 10;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_VOUCHERS_PER_PUBLISH = 200;
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
 const EXPOSE_DEMO_OTP = !IS_PRODUCTION && process.env.EXPOSE_DEMO_OTP !== 'false';
 const SERVE_BUILD = IS_PRODUCTION || process.env.NETS_SERVE_BUILD === 'true';
@@ -122,6 +123,41 @@ function makeInitialStore() {
     vouchers: {},
     audit: [],
   };
+}
+
+/**
+ * Records one voucher in the index, returning it, or null if the reference is
+ * not a usable code.
+ *
+ * Forward-only on purpose. A device republishes its wallet on every startup, so
+ * a phone that has been offline since before a voucher was spent will keep
+ * offering `used: false` for it. Honouring that would un-spend the voucher and
+ * let it be redeemed twice, so a voucher already marked used here stays used;
+ * the only transition a publish can cause is unused → used.
+ */
+function upsertVoucher(body) {
+  const refCode = String(body?.refCode || '').toUpperCase();
+  if (!/^[A-Za-z0-9-]{1,32}$/.test(refCode)) return null;
+  store.vouchers = store.vouchers || {};
+  const existing = store.vouchers[refCode];
+  if (existing) {
+    if (body.used && !existing.used) {
+      existing.used = true;
+      existing.usedAt = Number(body.usedAt) || Date.now();
+    }
+    return existing;
+  }
+  store.vouchers[refCode] = {
+    refCode,
+    title: String(body.title || '').slice(0, 120),
+    merchant: String(body.merchant || '').slice(0, 120),
+    xpCost: Number(body.xpCost) || 0,
+    redeemedAt: Number(body.redeemedAt) || Date.now(),
+    expiresAt: Number(body.expiresAt) || 0,
+    used: Boolean(body.used),
+    usedAt: Number(body.usedAt) || 0,
+  };
+  return store.vouchers[refCode];
 }
 
 function normalizeStoredValue(value) {
@@ -537,24 +573,38 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === '/api/voucher' && req.method === 'POST') {
     const body = await readJson(req);
-    const refCode = String(body.refCode || '').toUpperCase();
-    if (!/^[A-Za-z0-9-]{1,32}$/.test(refCode)) return json(res, 400, { error: 'Invalid voucher reference.' });
-    store.vouchers = store.vouchers || {};
-    // Registration is idempotent, and never resurrects a voucher already spent.
-    if (!store.vouchers[refCode]) {
-      store.vouchers[refCode] = {
-        refCode,
-        title: String(body.title || '').slice(0, 120),
-        merchant: String(body.merchant || '').slice(0, 120),
-        xpCost: Number(body.xpCost) || 0,
-        redeemedAt: Number(body.redeemedAt) || Date.now(),
-        expiresAt: Number(body.expiresAt) || 0,
-        used: Boolean(body.used),
-        usedAt: Number(body.usedAt) || 0,
-      };
-      persist();
-    }
-    return json(res, 200, { ok: true, voucher: store.vouchers[refCode] });
+    const voucher = upsertVoucher(body);
+    if (!voucher) return json(res, 400, { error: 'Invalid voucher reference.' });
+    persist();
+    return json(res, 200, { ok: true, voucher });
+  }
+
+  // Publishing the whole wallet in one request.
+  //
+  // A voucher is only verifiable from another device once it is in this index,
+  // and registering at the moment of redemption misses everything already in
+  // the wallet: the seeded demo vouchers, anything redeemed while offline, and
+  // anything redeemed before this index existed. The app therefore republishes
+  // its vouchers on startup and whenever the wallet is opened, which needs to
+  // be one round trip rather than one per voucher.
+  if (url.pathname === '/api/vouchers' && req.method === 'POST') {
+    const body = await readJson(req);
+    const incoming = Array.isArray(body.vouchers) ? body.vouchers.slice(0, MAX_VOUCHERS_PER_PUBLISH) : [];
+    const accepted = incoming.map(upsertVoucher).filter(Boolean);
+    if (accepted.length) persist();
+    return json(res, 200, { ok: true, count: accepted.length, rejected: incoming.length - accepted.length });
+  }
+
+  // Clearing the index, for the demo reset.
+  //
+  // The seeded vouchers use fixed reference codes, so without this a code spent
+  // in one run of the demo would still read as spent after a reset — the local
+  // database would show a fresh voucher that the counter refuses.
+  if (url.pathname === '/api/vouchers' && req.method === 'DELETE') {
+    store.vouchers = {};
+    audit('voucher_index_cleared', { userId: current.user.id });
+    persist();
+    return json(res, 200, { ok: true });
   }
 
   if (url.pathname === '/api/sync/state' && req.method === 'GET') {

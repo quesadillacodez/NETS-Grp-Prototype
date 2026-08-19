@@ -10,6 +10,7 @@
   import { restoreServerSession } from "./app/utils/authStorage";
   import { recordLogin } from "./app/utils/questStorage";
   import { getCurrentUser } from "./app/utils/userStorage";
+  import { syncVoucherIndex } from "./app/utils/rewardStorage";
   import { seedMerchantTradeIfEmpty } from "./app/utils/menuStorage";
 
   const root = createRoot(document.getElementById("root")!);
@@ -54,8 +55,14 @@
       // the current data immediately (then keeps updating on every change).
       syncDatabaseFilesNow();
 
-      // Completes the daily check-in mission for whoever is signed in.
-      try { recordLogin(getCurrentUser().id); } catch { /* nobody signed in yet */ }
+      // Completes the daily check-in mission for whoever is signed in, and
+      // republishes their vouchers so each one is verifiable from the phone
+      // that scans it, not only from the device that redeemed it.
+      try {
+        const user = getCurrentUser();
+        recordLogin(user.id);
+        void syncVoucherIndex(user.id);
+      } catch { /* nobody signed in yet */ }
 
       window.dispatchEvent(new CustomEvent("databaseReady"));
 

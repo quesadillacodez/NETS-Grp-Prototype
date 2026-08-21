@@ -8,7 +8,8 @@ import {
 } from './hangoutStorage';
 import {
   applyTierMultipliers, getTier, getTierProgress, listXPMonths, summariseMonth,
-  tierMultiplier, TIERS, buildQuestEntries, type XPHistoryEntry,
+  tierMultiplier, TIERS, buildQuestEntries, compareRewards, goalProgressFor,
+  type RewardSort, type XPHistoryEntry,
 } from './rewardStorage';
 import { buildLedger, expiryFor, type XPLedgerInput } from './xpLedger';
 import {
@@ -612,5 +613,53 @@ describe('grouping reminders into bills', () => {
 
   it('never collides a legacy row with a bill id', () => {
     expect(billKeyFor({ ...base, billId: 'pay-1' })).not.toBe(billKeyFor(base));
+  });
+});
+
+describe('working toward a reward', () => {
+  it('reports how far off a goal is', () => {
+    expect(goalProgressFor(500, 320)).toEqual({ remaining: 180, percent: 64, reached: false });
+  });
+
+  it('caps a reached goal at 100% rather than overshooting', () => {
+    expect(goalProgressFor(500, 900)).toEqual({ remaining: 0, percent: 100, reached: true });
+  });
+
+  it('treats a free reward as already reached', () => {
+    expect(goalProgressFor(0, 0).reached).toBe(true);
+  });
+
+  it('never reports negative progress from a negative balance', () => {
+    const progress = goalProgressFor(500, -50);
+    expect(progress.percent).toBe(0);
+    expect(progress.remaining).toBe(500);
+  });
+});
+
+describe('ordering the store', () => {
+  const reward = (xpCost: number, distanceKm: number | null = null, redemptions = 0) =>
+    ({ xpCost, distanceKm, redemptions });
+  const order = (items: ReturnType<typeof reward>[], sort: RewardSort, xp: number) =>
+    [...items].sort((a, b) => compareRewards(a, b, sort, xp)).map(r => r.xpCost);
+
+  it('leads with what the customer can afford', () => {
+    // A store that opens on rewards out of reach reads as a wall.
+    const items = [reward(1000), reward(150), reward(600), reward(200)];
+    expect(order(items, 'recommended', 300)).toEqual([150, 200, 600, 1000]);
+  });
+
+  it('sorts by price when asked', () => {
+    expect(order([reward(600), reward(150), reward(300)], 'cheapest', 0))
+      .toEqual([150, 300, 600]);
+  });
+
+  it('sorts by popularity, breaking ties on price', () => {
+    const items = [reward(600, null, 1), reward(150, null, 9), reward(300, null, 9)];
+    expect(order(items, 'popular', 0)).toEqual([150, 300, 600]);
+  });
+
+  it('puts rewards with no single outlet last when sorting by distance', () => {
+    const items = [reward(600, null), reward(150, 8), reward(300, 2)];
+    expect(order(items, 'nearest', 0)).toEqual([300, 150, 600]);
   });
 });

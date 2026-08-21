@@ -45,6 +45,35 @@ logged-in user and the roster is now a read-only "Who has voted" display.
 Bills tab instead of dropping you on To Receive, and saving reminder settings no
 longer throws you to the profile screen a second later.
 
+## XP Rewards Store changes
+
+The store could tell you what you could afford and what you could not. It could
+not tell you what to aim at, and that is the difference between a catalogue and
+something a customer comes back to.
+
+**A reward you are working toward.** Any reward out of reach can be saved as a
+goal. XP Home then carries it: the reward, a progress bar, how much is left, and
+the merchant it is at — so the balance on that screen stops being a number and
+becomes a distance. The goal belongs to the account rather than the device, so
+it follows a customer between sessions and does not carry across when the demo
+switches user, and it clears itself once redeemed rather than leaving someone
+tracking something they already hold.
+
+**Locked cards say how far off they are.** A card that reads only "View" is a
+dead end. Each now shows what it still needs — "180 XP to go" — which is the
+same information the affordability filter had, given where it is actually
+useful.
+
+**The store can be ordered.** Recommended, Lowest XP, Nearest and Most redeemed.
+Recommended leads with what the customer can afford and sorts by price within
+that, because a store opening on rewards out of reach reads as a wall; the
+others are literal and each falls back to price, so the listing is stable rather
+than reshuffling between renders. Turning on "Near me" is itself read as a
+request to order by distance. Rewards with no single outlet sort last under
+Nearest rather than pretending to be at zero distance.
+
+---
+
 ## Sponsored slots get a lane, a neighbourhood and a cooldown
 
 Three changes to paid placement, plus a teammate's split-bill work.

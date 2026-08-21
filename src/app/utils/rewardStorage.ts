@@ -519,6 +519,122 @@ export function getXPStats(userId: string): {
   };
 }
 
+// ─── Ordering the store ──────────────────────────────────────────────────────
+
+export type RewardSort = 'recommended' | 'cheapest' | 'nearest' | 'popular';
+
+export const REWARD_SORT_LABELS: Record<RewardSort, string> = {
+  recommended: 'Recommended',
+  cheapest: 'Lowest XP',
+  nearest: 'Nearest',
+  popular: 'Most redeemed',
+};
+
+export interface SortableReward {
+  xpCost: number;
+  /** Distance in km, or null when the reward has no single outlet. */
+  distanceKm: number | null;
+  redemptions: number;
+}
+
+/**
+ * Comparator for the store listing.
+ *
+ * "Recommended" puts what the customer can afford first, cheapest within that,
+ * because a store that leads with rewards out of reach reads as a wall. The
+ * other orders are literal, and each falls back to price so the listing is
+ * stable rather than shuffling between renders.
+ */
+export function compareRewards(
+  a: SortableReward,
+  b: SortableReward,
+  sort: RewardSort,
+  currentXP: number,
+): number {
+  switch (sort) {
+    case 'cheapest':
+      return a.xpCost - b.xpCost;
+    case 'popular':
+      return b.redemptions - a.redemptions || a.xpCost - b.xpCost;
+    case 'nearest': {
+      // Rewards with no single outlet sort last rather than pretending to be
+      // at distance zero.
+      const left = a.distanceKm ?? Infinity;
+      const right = b.distanceKm ?? Infinity;
+      return left - right || a.xpCost - b.xpCost;
+    }
+    case 'recommended':
+    default: {
+      const affordable = (reward: SortableReward) => (reward.xpCost <= currentXP ? 0 : 1);
+      return affordable(a) - affordable(b) || a.xpCost - b.xpCost;
+    }
+  }
+}
+
+// ─── Working toward a reward ─────────────────────────────────────────────────
+// A points store that only says "locked" gives a customer nothing to aim at.
+// Picking a goal turns the balance on XP Home from a number into a distance.
+
+export interface GoalProgress {
+  reward: Reward;
+  /** Spendable XP right now. */
+  currentXP: number;
+  /** XP still needed, zero once the goal is affordable. */
+  remaining: number;
+  /** 0-100, for the progress bar. */
+  percent: number;
+  reached: boolean;
+}
+
+/** How close a balance is to a target cost. Pure, so it is unit-testable. */
+export function goalProgressFor(xpCost: number, currentXP: number): {
+  remaining: number;
+  percent: number;
+  reached: boolean;
+} {
+  const cost = Math.max(0, xpCost);
+  const held = Math.max(0, currentXP);
+  if (cost === 0) return { remaining: 0, percent: 100, reached: true };
+  const remaining = Math.max(0, cost - held);
+  return {
+    remaining,
+    percent: Math.min(100, Math.round((held / cost) * 100)),
+    reached: remaining === 0,
+  };
+}
+
+const GOAL_KEY = (userId: string) => `reward-goal:${userId}`;
+
+export function getGoalRewardId(userId: string): number | null {
+  const rows = query('SELECT value FROM app_meta WHERE key = ?', [GOAL_KEY(userId)]);
+  if (rows.length === 0) return null;
+  const id = Number(rows[0].value);
+  return Number.isFinite(id) ? id : null;
+}
+
+export function setGoalReward(userId: string, rewardId: number | null): void {
+  if (rewardId === null) {
+    run('DELETE FROM app_meta WHERE key = ?', [GOAL_KEY(userId)]);
+  } else {
+    run('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', [GOAL_KEY(userId), String(rewardId)]);
+  }
+  window.dispatchEvent(new CustomEvent('rewardGoalUpdated'));
+}
+
+/**
+ * The customer's goal and how far off it is, or null if none is set or the
+ * reward has since left the catalogue — a goal pointing at something that can
+ * no longer be redeemed would be worse than none.
+ */
+export function getGoalProgress(userId: string): GoalProgress | null {
+  const rewardId = getGoalRewardId(userId);
+  if (rewardId === null) return null;
+  const reward = getRewardsCatalog().find(entry => entry.id === rewardId);
+  if (!reward) return null;
+  const currentXP = getXPStats(userId).currentXP;
+  return { reward, currentXP, ...goalProgressFor(reward.xpCost, currentXP) };
+}
+
 export function redeemReward(userId: string, reward: Reward): RewardRedemption | null {
   if (getXPStats(userId).currentXP < reward.xpCost) return null;
   const now = Date.now();

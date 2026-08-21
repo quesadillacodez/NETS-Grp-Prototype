@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import {
   AlertTriangle, Award, Check, ChevronDown, ChevronRight, Clock3, Flame, Gift, History, LockKeyhole,
-  MapPin, Megaphone, Navigation, Search, ShoppingBag, Sparkles, Store, TicketCheck, Trophy, WalletCards, X, Zap,
+  MapPin, Megaphone, Navigation, Search, ShoppingBag, Sparkles, Store, Target, TicketCheck, Trophy, WalletCards, X, Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -23,6 +23,12 @@ import {
   TIERS,
   getXPHistory,
   getXPStats,
+  getGoalProgress,
+  getGoalRewardId,
+  setGoalReward,
+  compareRewards,
+  REWARD_SORT_LABELS,
+  type RewardSort,
   isCashbackRedemption,
   markRewardUsed,
   redeemReward,
@@ -117,10 +123,12 @@ function OverlaySheet({ children, onClose }: { children: ReactNode; onClose: () 
   );
 }
 
-function RewardDetail({ reward, userId, currentXP, onRedeem, onClose }: {
+function RewardDetail({ reward, userId, currentXP, isGoal, onToggleGoal, onRedeem, onClose }: {
   reward: Reward;
   userId: string;
   currentXP: number;
+  isGoal: boolean;
+  onToggleGoal: () => void;
   onRedeem: () => void;
   onClose: () => void;
 }) {
@@ -156,6 +164,21 @@ function RewardDetail({ reward, userId, currentXP, onRedeem, onClose }: {
         <div className={`mb-4 rounded-xl p-3 text-xs ${canRedeem ? 'bg-success/10 text-success' : 'bg-red-50 text-red-700'}`}>
           {canRedeem ? `After redemption: ${(currentXP - reward.xpCost).toLocaleString()} XP` : `You need ${(reward.xpCost - currentXP).toLocaleString()} more XP.`}
         </div>
+
+        {!canRedeem && (
+          // Only offered while it is out of reach: setting a goal you can
+          // already afford would be a button that does nothing for you.
+          <button
+            onClick={onToggleGoal}
+            aria-pressed={isGoal}
+            className={`mb-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-black ${
+              isGoal ? 'bg-primary/10 text-primary' : 'border-2 border-primary/40 text-primary'
+            }`}
+          >
+            <Target size={16} aria-hidden="true" />
+            {isGoal ? 'Tracking this reward' : 'Save as my goal'}
+          </button>
+        )}
         <button disabled={!canRedeem} onClick={onRedeem} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">{canRedeem ? <><Gift size={17} /> Confirm redemption</> : <><LockKeyhole size={17} /> Not enough XP</>}</button>
       </div>
     </OverlaySheet>
@@ -405,6 +428,7 @@ function Overview({ userId, onTab, onOpenTiers, onOpenMonth, onOpenQuests }: {
   const signals = getQuestSignals(userId);
   const today = evaluateDay(signals, dayKey(Date.now()));
   const streak = currentStreak(signals);
+  const goal = getGoalProgress(userId);
   return (
     <div className="space-y-3">
       <motion.button type="button" onClick={onOpenTiers} initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="w-full overflow-hidden rounded-3xl bg-gradient-to-br from-[#126c55] via-[#0e7a5f] to-[#1e2a4a] p-5 text-left text-white shadow-lg">
@@ -421,6 +445,39 @@ function Overview({ userId, onTab, onOpenTiers, onOpenMonth, onOpenQuests }: {
         <button type="button" onClick={onOpenMonth} className="rounded-2xl border border-border bg-white p-3 text-left"><div className="flex items-center justify-between text-primary"><div className="flex items-center gap-2"><Zap size={16} /><span className="text-xs font-black">This month</span></div><ChevronRight size={14} className="text-muted-foreground" /></div><p className="mt-2 text-2xl font-black">+{stats.earnedThisMonth.toLocaleString()}</p><p className="text-[10px] text-muted-foreground">XP from real NETS payments</p></button>
         <button type="button" onClick={onOpenQuests} className="rounded-2xl border border-border bg-white p-3 text-left"><div className="flex items-center justify-between text-[#f59e0b]"><div className="flex items-center gap-2"><Trophy size={16} /><span className="text-xs font-black">Today's missions</span></div><ChevronRight size={14} className="text-muted-foreground" /></div><p className="mt-2 text-2xl font-black">{today.completedCount}/{today.missions.length}</p><p className="text-[10px] text-muted-foreground">{streak > 0 ? `${streak} day streak` : 'Start a streak today'}</p></button>
       </section>
+
+      {goal && (
+        <button
+          type="button"
+          onClick={() => onTab('store')}
+          className="flex w-full items-center gap-3 rounded-2xl border border-border bg-white p-3 text-left"
+        >
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-2xl" aria-hidden="true">
+            {goal.reward.icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="truncate text-xs font-black">{goal.reward.title}</p>
+              <span className={`shrink-0 text-[10px] font-black ${goal.reached ? 'text-success' : 'text-muted-foreground'}`}>
+                {goal.reached ? 'Ready' : `${goal.remaining.toLocaleString()} to go`}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${goal.percent}%` }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+                className={`h-full rounded-full ${goal.reached ? 'bg-success' : 'bg-primary'}`}
+              />
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {goal.reached
+                ? `You can redeem this now at ${goal.reward.merchant}.`
+                : `${goal.currentXP.toLocaleString()} of ${goal.reward.xpCost.toLocaleString()} XP · ${goal.reward.merchant}`}
+            </p>
+          </div>
+        </button>
+      )}
 
       {stats.expiringSoon > 0 && (
         <button type="button" onClick={() => onTab('ledger')} className="flex w-full items-center gap-3 rounded-2xl bg-[#fff4e5] p-3 text-left">
@@ -620,6 +677,7 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
   const [search, setSearch] = useState('');
   const [nearMeOnly, setNearMeOnly] = useState(false);
   const [affordableOnly, setAffordableOnly] = useState(false);
+  const [sort, setSort] = useState<RewardSort>('recommended');
   const userArea = getUserArea(userId);
   const term = search.trim().toLowerCase();
 
@@ -655,7 +713,13 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
       // Wallet cashback has no outlet, so it is not a "near me" result.
       (!nearMeOnly || isWithinRadius(proximity, DEFAULT_NEARBY_RADIUS_KM)) &&
       (!affordableOnly || reward.xpCost <= currentXP))
-    .sort((a, b) => (nearMeOnly ? byDistance(a.proximity, b.proximity) : 0));
+    .sort((a, b) => compareRewards(
+      { xpCost: a.reward.xpCost, distanceKm: a.proximity.km, redemptions: redemptionCounts.get(a.reward.id) ?? 0 },
+      { xpCost: b.reward.xpCost, distanceKm: b.proximity.km, redemptions: redemptionCounts.get(b.reward.id) ?? 0 },
+      // Turning on "Near me" is itself a request to order by distance.
+      nearMeOnly && sort === 'recommended' ? 'nearest' : sort,
+      currentXP,
+    ));
 
   // Promoted rewards lead the list, in the order NETS sold the slots. They are
   // filtered like everything else — a paid slot cannot force a reward into a
@@ -737,6 +801,22 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
 
       <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto pb-1">{(['All', 'Cashback', 'Vouchers', 'Partner Deals'] as const).map(item => <button key={item} onClick={() => setCategory(item)} aria-pressed={category === item} className={`min-h-11 whitespace-nowrap rounded-full px-3 text-xs font-bold ${category === item ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>{item}</button>)}</div>
 
+      <div className="no-scrollbar mb-3 flex items-center gap-2 overflow-x-auto pb-1">
+        <span className="shrink-0 text-[10px] font-black uppercase tracking-wide text-muted-foreground">Sort</span>
+        {(Object.keys(REWARD_SORT_LABELS) as RewardSort[]).map(option => (
+          <button
+            key={option}
+            onClick={() => setSort(option)}
+            aria-pressed={sort === option}
+            className={`min-h-9 whitespace-nowrap rounded-full px-3 text-[11px] font-bold ${
+              sort === option ? 'bg-[#1e2a4a] text-white' : 'bg-secondary text-muted-foreground'
+            }`}
+          >
+            {REWARD_SORT_LABELS[option]}
+          </button>
+        ))}
+      </div>
+
       {spotlightEntry && (
         <button
           onClick={() => onSelect(spotlightEntry.reward)}
@@ -799,6 +879,13 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
               <span className="text-xs font-black text-primary">{reward.xpCost} XP</span>
               <span className={`rounded-lg px-2 py-1 text-[9px] font-black ${locked ? 'bg-secondary text-muted-foreground' : 'bg-primary text-white'}`}>{locked ? 'View' : 'Redeem'}</span>
             </div>
+            {locked && (
+              // A locked card that only says "View" is a dead end; the gap is
+              // what turns it into something to aim at.
+              <p className="mt-1 text-[9px] font-bold text-muted-foreground">
+                {(reward.xpCost - currentXP).toLocaleString()} XP to go
+              </p>
+            )}
           </button>
         );
       })}</div>
@@ -991,9 +1078,17 @@ export function RewardsPage() {
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showTiers, setShowTiers] = useState(false);
+  const [goalRewardId, setGoalRewardId] = useState<number | null>(() => getGoalRewardId(getCurrentUser().id));
   const navigate = useNavigate();
   const [, setVersion] = useState(0);
-  const refresh = () => { setCurrentUser(getCurrentUser()); setVersion(version => version + 1); };
+  const refresh = () => {
+    const user = getCurrentUser();
+    setCurrentUser(user);
+    // The goal belongs to the account, so it has to follow a switch rather than
+    // carrying the previous customer's target across.
+    setGoalRewardId(getGoalRewardId(user.id));
+    setVersion(version => version + 1);
+  };
   useAppEvents(['transactionsUpdated', 'rewardRedemptionsUpdated', 'dealsUpdated', 'userSwitched', 'databaseReady', 'focus', 'locationChanged'], refresh);
   const stats = getXPStats(currentUser.id);
 
@@ -1006,8 +1101,11 @@ export function RewardsPage() {
   const confirmRedemption = () => {
     if (!selectedReward) return;
     const result = redeemReward(currentUser.id, selectedReward);
+    const redeemedGoal = goalRewardId === selectedReward.id;
     setSelectedReward(null);
     if (result) {
+      // A goal you have already redeemed is no longer something to work toward.
+      if (redeemedGoal) setGoalReward(currentUser.id, null);
       refresh();
       setTab('wallet');
       // The confirmation receipt comes first; the voucher itself is one tap away.
@@ -1076,7 +1174,23 @@ export function RewardsPage() {
         )}
       </AnimatePresence>
       <AnimatePresence>{showTiers && <TierSheet lifetimeXP={stats.lifetimeXP} onClose={() => setShowTiers(false)} />}</AnimatePresence>
-      <AnimatePresence>{selectedReward && <RewardDetail reward={selectedReward} userId={currentUser.id} currentXP={stats.currentXP} onClose={() => setSelectedReward(null)} onRedeem={confirmRedemption} />}</AnimatePresence>
+      <AnimatePresence>
+        {selectedReward && (
+          <RewardDetail
+            reward={selectedReward}
+            userId={currentUser.id}
+            currentXP={stats.currentXP}
+            isGoal={goalRewardId === selectedReward.id}
+            onToggleGoal={() => {
+              const next = goalRewardId === selectedReward.id ? null : selectedReward.id;
+              setGoalReward(currentUser.id, next);
+              setGoalRewardId(next);
+            }}
+            onClose={() => setSelectedReward(null)}
+            onRedeem={confirmRedemption}
+          />
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {receipt && (
           <RedemptionReceipt

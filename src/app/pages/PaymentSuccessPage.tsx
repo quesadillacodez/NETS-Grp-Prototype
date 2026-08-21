@@ -61,10 +61,21 @@ export function PaymentSuccessPage() {
     }
 
     const allUsers = getAllUsers();
-    // One shared timestamp for every reminder in THIS split. Each time you split
-    // a bill it becomes its own group, so running the same merchant twice makes
-    // two separate bills instead of one combined one.
-    const billCreatedDate = new Date().toISOString();
+
+    // Guard against a corrupt split: everyone's shares must add up to the bill
+    // total, within a cent for rounding. If they do not, we skip creating the
+    // shared-bill reminders rather than save impossible numbers — a $119.85
+    // share on a $79.90 bill would chase friends for money they do not owe.
+    // The payment itself is already recorded above and stands.
+    const sharesTotal = participants.reduce((sum, item) => sum + (item.amount || 0), 0);
+    if (Math.abs(sharesTotal - amount) > 0.01) {
+      console.warn(
+        `Split shares ($${sharesTotal.toFixed(2)}) do not match bill total ($${amount.toFixed(2)}) — skipping reminder creation for payment ${paymentId}.`
+      );
+      markPaymentProcessed(paymentId);
+      return;
+    }
+
     const newReminders = friends
       .map((participant) => {
         const friendUser = allUsers.find(user => user.id === participant.userId)
@@ -79,7 +90,9 @@ export function PaymentSuccessPage() {
           fromUserId: currentUser.id, toUserId: friendUser.id,
           fromUserName: currentUser.name, toUserName: participant.name,
           totalBillAmount: amount, payerShare,
-          createdDate: billCreatedDate,
+          // The payment's own id is this split's bill id, so running the same
+          // merchant twice makes two separate bills instead of one combined one.
+          billId: paymentId,
         };
       })
       .filter((reminder): reminder is NonNullable<typeof reminder> => reminder !== null);

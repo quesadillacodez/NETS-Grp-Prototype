@@ -5,6 +5,46 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## A split bill gets its own id, and a vote belongs to one person
+
+A second round from AnNi, on top of her earlier split-bill work.
+
+**Splits are keyed by the payment, not by the clock.** The previous entry gave
+each split its own identity by keying on merchant, payer and the moment it was
+made. That separates two splits at the same stall on different days, but two
+made in the same second — the same merchant scanned twice in one sitting, both
+labelled "Just now" — still collapsed into one bill with a double-counted total
+and, once the payer's share was derived from it, a *negative* share on screen. A
+split now carries the payment's own id in a new `reminders.bill_id` column, so
+two splits are two bills no matter how close together they were made. Rows
+written before the column existed keep the old key as a fallback, and the
+dashboard and the shared bill screen now derive that key from one shared
+`billKeyFor` helper — building it separately in two places is what let a tapped
+bill open as an empty one. Older databases get the column by migration.
+
+**A payer's share is read, not reconstructed.** The shared bill screen worked
+the payer's share out as total minus everyone else's. That is only correct while
+the numbers are, and it had no floor, so bad data rendered as the payer being
+owed a negative amount. The share recorded at payment time is now used directly,
+with the subtraction kept only for legacy rows that never stored one, and the
+result clamped at zero.
+
+**An impossible split is refused rather than saved.** Nothing checked that the
+shares in a split added up to the bill. A corrupt split could write reminders
+chasing friends for money they did not owe — a $119.85 share on a $79.90 bill.
+Shares are now summed against the bill total, within a cent for rounding, before
+any reminder is written; if they disagree the reminders are skipped and the
+mismatch logged. The payment itself is unaffected and still recorded.
+
+**You can only cast your own vote.** Hangout voting had a "Voting as" switcher
+that let anyone on the device vote as any participant, host included — convenient
+for a single-device demo, indefensible as a product. Voting is locked to the
+logged-in user and the roster is now a read-only "Who has voted" display.
+
+**Two smaller fixes.** Coming back from a shared bill returns you to the Shared
+Bills tab instead of dropping you on To Receive, and saving reminder settings no
+longer throws you to the profile screen a second later.
+
 ## Sponsored slots get a lane, a neighbourhood and a cooldown
 
 Three changes to paid placement, plus a teammate's split-bill work.
@@ -35,6 +75,7 @@ payer and when it was made. Splitting the same merchant twice used to merge into
 one combined bill with a double-counted total; the dashboard, the shared bill
 screen and the demo scenario all now treat one split as one bill. Includes her
 migration for older databases missing `merchant_items.category`.
+
 ## Every voucher verifiable from any device, not just the one that issued it
 
 The previous entry published redemptions to a server index so a merchant's phone

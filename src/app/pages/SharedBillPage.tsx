@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Check, Clock, AlertCircle, Users } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router';
 import { motion } from 'motion/react';
-import { getAllReminders } from '../utils/reminderStorage';
+import { getAllReminders, billKeyFor } from '../utils/reminderStorage';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { DarkHeader } from '../components/DarkHeader';
 
@@ -22,21 +22,20 @@ export function SharedBillPage() {
 
   useEffect(() => {
     if (!merchantName) {
-      navigate('/reminders', { replace: true });
+      navigate('/reminders', { replace: true, state: { tab: 'shared-bills' } });
       return;
     }
 
     const allUsers = getAllUsers();
-    // Show ONLY the one split that was tapped. Match the same key the dashboard
-    // built (merchant + payer + when it was made), so two bills at the same
-    // merchant never combine. Falls back to merchant+payer if no billId came in.
-    const reminders = getAllReminders().filter((r: any) => {
-      if (billId) return `${r.category}-${r.fromUserId}-${r.createdDate ?? r.date}` === billId;
-      return r.category === merchantName && r.fromUserId === payerId;
-    });
+    // Show ONLY the one split that was tapped, matched on the same key the
+    // dashboard grouped by, so two bills at the same merchant never combine.
+    // Falls back to merchant + payer if no key came in.
+    const reminders = getAllReminders().filter((r: any) => (
+      billId ? billKeyFor(r) === billId : r.category === merchantName && r.fromUserId === payerId
+    ));
 
     if (reminders.length === 0) {
-      navigate('/reminders', { replace: true });
+      navigate('/reminders', { replace: true, state: { tab: 'shared-bills' } });
       return;
     }
 
@@ -60,8 +59,12 @@ export function SharedBillPage() {
       }
     });
 
+    // Prefer the payer's own share as recorded at payment time. Fall back to
+    // (total − others) only for legacy rows that never stored it, and clamp at
+    // 0 so a bad split can never render the payer a negative share.
     const othersTotal = Array.from(participantMap.values()).reduce((sum, p) => sum + p.amount, 0);
-    const payerShare = totalAmount - othersTotal;
+    const storedShare = creditor.payerShare;
+    const payerShare = Math.max(0, storedShare != null ? storedShare : totalAmount - othersTotal);
 
     const participants = [
       { name: creditor.fromUserName, avatar: creditorUser?.avatar || '👤', amount: payerShare, status: 'paid', isPayer: true },
@@ -75,7 +78,7 @@ export function SharedBillPage() {
       paidCount: participants.filter((p: any) => p.status === 'paid').length,
       date: creditor.date || 'Recently',
     });
-  }, [merchantName, navigate]);
+  }, [merchantName, payerId, billId, navigate]);
 
   if (!merchantName || !billData) return null;
 
@@ -89,7 +92,7 @@ export function SharedBillPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <DarkHeader title="Shared Bill" onBack={() => navigate('/reminders')} bottomGap="mb-4" padding="pt-12 pb-4">
+      <DarkHeader title="Shared Bill" onBack={() => navigate('/reminders', { state: { tab: 'shared-bills' } })} bottomGap="mb-4" padding="pt-12 pb-4">
         <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/20">
           <div className="flex items-center gap-2.5 mb-2.5">
             <div className="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center">

@@ -403,12 +403,10 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
   const noVotesYet = leaderIds.length === 0;
   const users = getAllUsers();
 
-  // Every selected participant (owner + everyone invited) can vote. On a single
-  // device you pick who is casting the vote here, so nobody who was invited is
-  // left out.
-  const [voterId, setVoterId] = useState(currentUserId);
-  const activeVoter = participantIds.includes(voterId) ? voterId : currentUserId;
-  const currentVote = votes.find(vote => vote.userId === activeVoter)?.activityId;
+  // Voting is locked to the logged-in user — you cast your own vote and nobody
+  // else's. The roster below shows who has voted so far, but it is a display,
+  // not a way to vote on a friend's behalf.
+  const currentVote = votes.find(vote => vote.userId === currentUserId)?.activityId;
 
   // Once the activity has been paid (via the scan flow), we show its ticket
   // instead of the Pay button — a hangout can only be paid once.
@@ -421,7 +419,7 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
   const canFinalize = owner && canOwnerConfirm(plan, currentUserId, votes);
 
   const selectVote = (activityId: number) => {
-    voteForActivity(plan.id, activeVoter, activityId);
+    voteForActivity(plan.id, currentUserId, activityId);
     onRefresh();
   };
   const finalize = () => {
@@ -464,22 +462,21 @@ function PlanDetail({ plan, currentUserId, onRefresh, onClose, onPay }: {
         ) : (
           <div>
             <div className="mb-3 rounded-2xl bg-secondary p-2.5">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Voting as</p>
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Who has voted</p>
               <div className="flex flex-wrap gap-1.5">
                 {participantIds.map(id => {
                   const user = users.find(item => item.id === id);
-                  const isActive = id === activeVoter;
+                  const isYou = id === currentUserId;
                   const hasVoted = votes.some(vote => vote.userId === id);
                   return (
-                    <button
+                    <span
                       key={id}
-                      onClick={() => setVoterId(id)}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-bold ${isActive ? 'bg-primary text-white' : 'border border-border bg-white text-muted-foreground'}`}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-bold ${isYou ? 'bg-primary text-white' : 'border border-border bg-white text-muted-foreground'}`}
                     >
                       <span>{user?.avatar ?? '?'}</span>
-                      {(user?.name ?? 'Friend').split(' ')[0]}{id === plan.ownerUserId ? ' (host)' : ''}
-                      {hasVoted && <Check size={11} className={isActive ? 'text-white' : 'text-success'} />}
-                    </button>
+                      {isYou ? 'You' : (user?.name ?? 'Friend').split(' ')[0]}{id === plan.ownerUserId ? ' (host)' : ''}
+                      {hasVoted && <Check size={11} className={isYou ? 'text-white' : 'text-success'} />}
+                    </span>
                   );
                 })}
               </div>

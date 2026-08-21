@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   created_date       TEXT,
   paid_date          TEXT,
   thank_you          TEXT,
+  bill_id            TEXT,
   FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (to_user_id)   REFERENCES users(id) ON DELETE CASCADE
 );
@@ -618,14 +619,19 @@ export async function initDatabase(): Promise<void> {
     console.warn('merchant_items.category migration skipped:', e);
   }
 
+  // Reminders gained thank_you, then bill_id, after the initial release. Older
+  // databases have neither, and a split bill cannot be grouped without bill_id.
   try {
     const cols = db.exec('PRAGMA table_info(reminders)');
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
     if (!names.includes('thank_you')) {
       db.run('ALTER TABLE reminders ADD COLUMN thank_you TEXT');
     }
+    if (!names.includes('bill_id')) {
+      db.run('ALTER TABLE reminders ADD COLUMN bill_id TEXT');
+    }
   } catch (e) {
-    console.warn('reminders.thank_you migration skipped:', e);
+    console.warn('reminders column migration skipped:', e);
   }
 
   try {

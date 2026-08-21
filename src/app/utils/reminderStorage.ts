@@ -20,6 +20,12 @@ export interface Reminder {
   createdDate?: string;
   paidDate?: string;
   thankYou?: string;
+  /**
+   * Which split this reminder belongs to. Stamped once per payment, so two
+   * splits at the same merchant stay two separate bills. Absent on rows created
+   * before the column existed.
+   */
+  billId?: string;
 }
 
 function rowToReminder(r: Record<string, any>): Reminder {
@@ -43,7 +49,26 @@ function rowToReminder(r: Record<string, any>): Reminder {
     createdDate: r.created_date ?? undefined,
     paidDate: r.paid_date ?? undefined,
     thankYou: r.thank_you ?? undefined,
+    billId: r.bill_id ?? undefined,
   };
+}
+
+/**
+ * The key that decides which split a reminder belongs to.
+ *
+ * A reminder written since `bill_id` landed carries the payment's own id, so
+ * two splits at the same merchant are two bills no matter how close together
+ * they were made. Rows written before the column existed have no id to group
+ * on, so they fall back to merchant + payer + when the split was made — which
+ * separates same-merchant splits on different days but not within the same
+ * second. The dashboard and the shared bill screen must build this key the same
+ * way or a tapped bill opens as an empty one, so they both call this.
+ */
+export function billKeyFor(
+  reminder: Pick<Reminder, 'billId' | 'category' | 'fromUserId' | 'createdDate' | 'date'>,
+): string {
+  if (reminder.billId) return `bill-${reminder.billId}`;
+  return `${reminder.category}-${reminder.fromUserId}-${reminder.createdDate ?? reminder.date}`;
 }
 
 function notifyUpdated(): void {
@@ -73,14 +98,15 @@ export function addReminders(newReminders: Omit<Reminder, 'id'>[]): number[] {
          from_user_id, to_user_id, from_user_name, to_user_name,
          name, amount, status, date, category, avatar,
          reminder_sent, last_reminder_date, total_bill_amount, payer_share,
-         reminder_count, created_date, paid_date
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         reminder_count, created_date, paid_date, bill_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         r.fromUserId, r.toUserId, r.fromUserName, r.toUserName,
         r.name, r.amount, r.status, r.date, r.category, r.avatar,
         r.reminderSent ? 1 : 0, r.lastReminderDate ?? null,
         r.totalBillAmount ?? null, r.payerShare ?? null,
         r.reminderCount ?? 0, r.createdDate ?? new Date().toISOString(), r.paidDate ?? null,
+        r.billId ?? null,
       ]
     );
     ids.push(lastInsertId());
@@ -231,6 +257,7 @@ export function seedDemoHistoryIfEmpty(): void {
       avatar: '👩', reminderSent: true, lastReminderDate: daysAgo(12),
       totalBillAmount: 36.00, payerShare: 18.00, reminderCount: 1,
       createdDate: daysAgo(12), paidDate: daysAgo(10), thankYou: '🙏 Thanks for covering!',
+      billId: 'seed-bill-marina-bay',
     },
   ]);
 

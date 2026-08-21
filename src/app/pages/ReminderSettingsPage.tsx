@@ -42,7 +42,6 @@ export function ReminderSettingsPage() {
 
     toast.success('Reminder settings saved!');
     window.dispatchEvent(new CustomEvent('reminderSettingsUpdated'));
-    setTimeout(() => navigate('/profile'), 1000);
   };
 
   return (

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Plus, Clock, CheckCircle2, AlertCircle, ArrowDownLeft, ArrowUpRight, Users, BarChart3, TrendingUp } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { BottomNav } from '../components/BottomNav';
 import { NETSLogo } from '../components/NETSLogo';
 import { NotificationPopup } from '../components/NotificationPopup';
-import { getRemindersToReceive, getRemindersToPay, markReminderAsPaid, getAllReminders, getUserInsights } from '../utils/reminderStorage';
+import { getRemindersToReceive, getRemindersToPay, markReminderAsPaid, getAllReminders, getUserInsights, billKeyFor } from '../utils/reminderStorage';
 import { addTransaction, formatDateForTransaction } from '../utils/transactionStorage';
 import { categorizeMerchant } from '../utils/spendingInsights';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
@@ -133,7 +133,8 @@ function SharedBillsTab({ sharedBillsMap, currentUser }: { sharedBillsMap: Map<s
       {Array.from(sharedBillsMap.entries()).map(([key, reminders]) => {
         const first = reminders[0];
         const uniqueParticipants = new Set(reminders.map((r) => r.toUserId));
-        // One split per group now, so the total is that split's own bill amount.
+        // Each group is a single bill, so its total is the bill amount recorded
+        // on any of its reminders — taken once, not summed.
         const totalAmount = reminders.find((r) => r.totalBillAmount)?.totalBillAmount
           ?? reminders.reduce((sum, r) => sum + r.amount, 0);
         const participantTotals = new Map<string, { allPaid: boolean }>();
@@ -309,7 +310,11 @@ function StatRow({ label, value, valueClass = 'text-foreground' }: { label: stri
 
 export function ReminderDashboardPage() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<Tab>('to-receive');
+  const location = useLocation();
+  // Arriving with a requested tab (coming back from a shared bill) opens on
+  // that tab, rather than dropping the user back on "To Receive".
+  const requestedTab = (location.state as { tab?: Tab } | null)?.tab;
+  const [activeTab, setActiveTab] = useState<Tab>(requestedTab ?? 'to-receive');
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [remindersToReceive, setRemindersToReceive] = useState<any[]>([]);
   const [remindersToPay, setRemindersToPay] = useState<any[]>([]);
@@ -330,9 +335,9 @@ export function ReminderDashboardPage() {
   const allReminders = getAllReminders();
   const allBillsMap = new Map<string, any[]>();
   allReminders.forEach((r: any) => {
-    // Group by merchant + payer + when the split was made, so running the same
-    // merchant twice shows as two separate bills instead of one combined one.
-    const key = `${r.category}-${r.fromUserId}-${r.createdDate ?? r.date}`;
+    // Each split is its own bill, keyed by the bill_id stamped at payment time,
+    // so splitting the same merchant twice stays as two separate bills.
+    const key = billKeyFor(r);
     if (!allBillsMap.has(key)) allBillsMap.set(key, []);
     allBillsMap.get(key)!.push(r);
   });

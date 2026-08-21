@@ -169,6 +169,7 @@ export function loadPresentationScenario(): DemoScenarioSummary {
     reminderSent: true, lastReminderDate: isoDaysAgo(11),
     totalBillAmount: 36.00, payerShare: 18.00, reminderCount: 1,
     createdDate: isoDaysAgo(11), paidDate: isoDaysAgo(9), thankYou: '🙏 Thanks for covering!',
+    billId: 'demo-bill-marina-bay',
   }]);
 
   addTransactions([
@@ -195,23 +196,22 @@ export function loadPresentationScenario(): DemoScenarioSummary {
     category: 'Food & Dining', kind: 'purchase', createdAt: daysAgo(1),
   }]);
 
-  // Both debtors are in the SAME split, so they share one createdDate and group
+  // Both debtors are in the SAME split, so they share one bill id and group
   // into a single bill.
-  const dtfCreatedDate = isoDaysAgo(1);
   const openReminderIds = addReminders([
     {
       fromUserId: ALEX, toUserId: SARAH, fromUserName: 'Alex Chen', toUserName: 'Sarah Tan',
       name: 'Sarah Tan', amount: share, status: 'pending', date: isoDaysAgo(1),
       category: 'Din Tai Fung', avatar: sarah?.avatar ?? '👩',
       totalBillAmount: openBill, payerShare: share, reminderCount: 0,
-      createdDate: dtfCreatedDate,
+      createdDate: isoDaysAgo(1), billId: 'demo-bill-din-tai-fung',
     },
     {
       fromUserId: ALEX, toUserId: MIKE, fromUserName: 'Alex Chen', toUserName: 'Mike Wong',
       name: 'Mike Wong', amount: share, status: 'pending', date: isoDaysAgo(1),
       category: 'Din Tai Fung', avatar: mike?.avatar ?? '👨',
       totalBillAmount: openBill, payerShare: share, reminderCount: 0,
-      createdDate: dtfCreatedDate,
+      createdDate: isoDaysAgo(1), billId: 'demo-bill-din-tai-fung',
     },
   ]);
 

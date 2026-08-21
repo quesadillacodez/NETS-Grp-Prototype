@@ -19,6 +19,7 @@ import { daysUntil, groupExpiringXP } from './xpExpiryScheduler';
 import { encodeQr, qrPath } from './qrCode';
 import { voucherScanUrl } from './voucherLink';
 import { effectiveBonus, isCampaignActive, type Merchant } from './merchantStorage';
+import { billKeyFor } from './reminderStorage';
 
 describe('splitAmountExactly', () => {
   it('assigns rounding cents without changing the bill total', () => {
@@ -579,5 +580,37 @@ describe('voucher scan links', () => {
 
   it('escapes a code so it cannot alter the path', () => {
     expect(voucherScanUrl('XP-A/B?c=1')).toContain('/v/XP-A%2FB%3Fc%3D1');
+  });
+});
+
+describe('grouping reminders into bills', () => {
+  const base = {
+    category: 'Din Tai Fung', fromUserId: '1',
+    createdDate: '2026-08-20T10:00:00.000Z', date: 'Just now',
+  };
+
+  it('keeps two splits at the same merchant apart', () => {
+    // The bug this fixes: two splits at one merchant merged into a single bill
+    // whose total was double-counted. Separate payments, separate bills.
+    expect(billKeyFor({ ...base, billId: 'pay-1' }))
+      .not.toBe(billKeyFor({ ...base, billId: 'pay-2' }));
+  });
+
+  it('keeps everyone in one split together', () => {
+    const sarah = { ...base, billId: 'pay-1', toUserName: 'Sarah' };
+    const mike = { ...base, billId: 'pay-1', toUserName: 'Mike' };
+    expect(billKeyFor(sarah)).toBe(billKeyFor(mike));
+  });
+
+  it('falls back to merchant, payer and time for rows written before bill ids', () => {
+    // Legacy rows have no id to group on. They still separate by when the split
+    // was made, which is what the app keyed on before bill_id existed.
+    expect(billKeyFor(base)).toBe(billKeyFor({ ...base }));
+    expect(billKeyFor(base))
+      .not.toBe(billKeyFor({ ...base, createdDate: '2026-08-21T10:00:00.000Z' }));
+  });
+
+  it('never collides a legacy row with a bill id', () => {
+    expect(billKeyFor({ ...base, billId: 'pay-1' })).not.toBe(billKeyFor(base));
   });
 });

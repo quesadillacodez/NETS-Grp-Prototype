@@ -78,16 +78,34 @@ export function VoucherScanPage() {
 
     (async () => {
       // The server index is tried first: a phone scanning the QR is not signed
-      // in as the customer, so it has no copy of their database to read.
+      // in as the customer, so it has no copy of their database to read. It is
+      // also the only party that can see a spend made from another device, so
+      // its verdict wins whenever it holds the code.
       const remote = await redeemVoucherRemotely(refCode);
       if (cancelled) return;
-      if (remote.reachable && remote.voucher) {
+      if (remote.voucher) {
         setResult({ ok: remote.ok, reason: remote.reason, redemption: fromRemote(remote.voucher) });
         return;
       }
-      // Same-device scan, or a voucher redeemed before it was published: the
-      // local record is still authoritative.
-      setResult(redeemByRefCode(refCode));
+
+      // Nothing indexed under this code, or the server could not be reached.
+      // A same-device scan can still be honoured from the local database.
+      const local = redeemByRefCode(refCode);
+      if (cancelled) return;
+      if (local.redemption) {
+        setResult(local);
+        return;
+      }
+
+      // Neither source knows the code. Say which, so an unpublished voucher on
+      // a flaky connection is not mistaken for a forged one.
+      setResult({
+        ok: false,
+        reason: remote.reachable
+          ? 'No voucher matches this code.'
+          : 'This voucher could not be checked — the device scanning it is offline.',
+        redemption: null,
+      });
     })();
 
     return () => { cancelled = true; };

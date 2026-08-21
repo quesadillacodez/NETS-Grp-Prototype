@@ -7,6 +7,8 @@ import { createHangout, getActivities, voteForActivity } from './hangoutStorage'
 import { seedDealsIfEmpty } from './dealStorage';
 import { ensureFashionMerchants, seedMerchantsIfEmpty } from './merchantStorage';
 import { getAllUsers } from './userStorage';
+import { syncVoucherIndex } from './rewardStorage';
+import { clearRemoteVouchers } from './voucherRegistry';
 
 /**
  * Presentation controls.
@@ -334,14 +336,30 @@ export function loadPresentationScenario(): DemoScenarioSummary {
   };
 }
 
+/**
+ * Rebuilds the server voucher index to match the database that was just seeded.
+ *
+ * The seeded vouchers use fixed reference codes, so an index left over from an
+ * earlier run still holds `XP-DEMO04` marked spent. Without the clear, the
+ * wallet would show a fresh voucher that the counter refuses as already used —
+ * the reset would appear not to have worked.
+ */
+async function rebuildVoucherIndex(): Promise<void> {
+  await clearRemoteVouchers();
+  for (const user of getAllUsers()) await syncVoucherIndex(user.id);
+}
+
 /** Reset and reseed, then persist immediately so a reload keeps the new state. */
 export async function loadPresentationScenarioAndSave(): Promise<DemoScenarioSummary> {
   const summary = loadPresentationScenario();
   await flushSave();
+  await rebuildVoucherIndex();
   return summary;
 }
 
 export async function clearActivityDataAndSave(): Promise<void> {
   clearActivityData();
   await flushSave();
+  // Clearing activity removes every redemption, so the index must go with it.
+  await clearRemoteVouchers();
 }

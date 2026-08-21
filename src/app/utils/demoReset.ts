@@ -282,6 +282,19 @@ export function loadPresentationScenario(): DemoScenarioSummary {
     // And a milk tea deal, then paid at LiHO three days later.
     { userId: ALEX, rewardId: 10, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA', xpCost: 350, days: 5, used: true, validityDays: 14 },
     { userId: ALEX, rewardId: 1, title: '$5 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 500, days: 7, used: true, validityDays: 0 },
+    // A top-tier customer has been spending, not just accumulating. Without a
+    // redemption history the balance only ever grows, the whole catalogue is
+    // affordable, and the affordability filter and a saved goal have nothing
+    // to act on. The last two are left unused so the wallet holds live vouchers.
+    { userId: ALEX, rewardId: 8, title: '$10 Ride Credit', merchant: 'Grab', xpCost: 1000, days: 21, used: true, validityDays: 45 },
+    { userId: ALEX, rewardId: 11, title: '$8 Grocery Voucher', merchant: 'FairPrice', xpCost: 800, days: 18, used: true, validityDays: 30 },
+    { userId: ALEX, rewardId: 9, title: '15% Off Stationery', merchant: 'Popular Bookstore', xpCost: 600, days: 16, used: true, validityDays: 30 },
+    { userId: ALEX, rewardId: 12, title: '$10 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 1000, days: 14, used: true, validityDays: 0 },
+    { userId: ALEX, rewardId: 15, title: '$25 Hawker Feast Bundle', merchant: 'Hawker Centres', xpCost: 2500, days: 12, used: true, validityDays: 60 },
+    { userId: ALEX, rewardId: 7, title: '$5 Breakfast Set', merchant: 'Ya Kun Kaya Toast', xpCost: 450, days: 9, used: true, validityDays: 30 },
+    { userId: ALEX, rewardId: 4, title: '$2 Off Chicken Rice Set', merchant: 'Tiong Bahru Chicken Rice', xpCost: 200, days: 6, used: true, validityDays: 30 },
+    { userId: ALEX, rewardId: 5, title: 'Free Curry Puff', merchant: 'Old Chang Kee', xpCost: 180, days: 4, used: false, validityDays: 14 },
+    { userId: ALEX, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 2, used: false, validityDays: 30 },
     { userId: SARAH, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 10, used: false, validityDays: 30 },
     { userId: MIKE, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 8, used: false, validityDays: 30 },
   ];

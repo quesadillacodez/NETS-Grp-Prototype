@@ -803,7 +803,13 @@ export function queryOne(sql: string, params: SqlValue[] = []): Row | null {
 }
 
 export function run(sql: string, params: SqlValue[] = []): void {
-  requireDb().run(sql, params);
+  // sql.js branches on `params` being truthy, and an empty array is truthy: it
+  // then prepares a single statement and silently drops every statement after
+  // the first. Multi-statement scripts (clearActivityData's sixteen DELETEs)
+  // have to go down the exec path, so only pass params when there are some.
+  const db = requireDb();
+  if (params.length > 0) db.run(sql, params);
+  else db.run(sql);
   scheduleSave();
 }
 

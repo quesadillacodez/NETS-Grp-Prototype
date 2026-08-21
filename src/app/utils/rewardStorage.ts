@@ -166,6 +166,12 @@ export const REWARDS: Reward[] = [
   { id: 7, merchant: 'Ya Kun Kaya Toast', title: '$5 Breakfast Set', xpCost: 450, category: 'Partner Deals', icon: '🍞', tags: ['Food'], description: 'Redeem a selected traditional breakfast set.', validityDays: 30, area: 'Raffles Place' },
   { id: 8, merchant: 'Grab', title: '$10 Ride Credit', xpCost: 1000, category: 'Partner Deals', icon: '🚗', tags: ['Travel'], description: 'Receive a digital ride credit code in your rewards wallet.', validityDays: 45, area: 'Multiple outlets' },
   { id: 9, merchant: 'Popular Bookstore', title: '15% Off Stationery', xpCost: 600, category: 'Partner Deals', icon: '📚', tags: ['Campus'], description: 'Save on one stationery purchase at participating outlets.', validityDays: 30, area: 'Bras Basah' },
+  // Aspirational rewards. Without something priced above a top-tier balance the
+  // catalogue runs out: a Kampung Spirit customer can buy all of it outright,
+  // which leaves the tier ladder, the affordability filter and a saved goal
+  // with nothing to act on.
+  { id: 15, merchant: 'Hawker Centres', title: '$25 Hawker Feast Bundle', xpCost: 2500, category: 'Vouchers', icon: '🥡', tags: ['Local', 'Food'], description: 'Five $5 heartland vouchers to use across participating hawker stalls.', validityDays: 60, area: 'Multiple outlets' },
+  { id: 16, merchant: 'NETS Travel', title: '$150 Travel Voucher', xpCost: 15000, category: 'Partner Deals', icon: '✈️', tags: ['Travel', 'Flagship'], description: 'The flagship reward — redeemable against flights and hotels with NETS travel partners.', validityDays: 90, area: 'Multiple outlets' },
   // Neighbourhood stalls, each tied to one estate. These are what make a
   // sponsored slot local: an Ang Mo Kio customer sees Cheng San, a Woodlands
   // customer sees Marsiling, and neither sees the other's.

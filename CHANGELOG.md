@@ -45,6 +45,32 @@ logged-in user and the roster is now a read-only "Who has voted" display.
 Bills tab instead of dropping you on To Receive, and saving reminder settings no
 longer throws you to the profile screen a second later.
 
+## Demo resets never cleared, and the store had nothing left to want
+
+**`clearActivityData` only ever ran its first statement.** `run(sql)` defaults
+its params to an empty array, and sql.js branches on `params` being *truthy* —
+an empty array is — so it prepared a single statement and silently dropped
+every one after it. Sixteen `DELETE`s, and only `DELETE FROM notifications`
+executed. Loading the presentation scenario therefore stacked on top of the last
+run instead of replacing it: transactions, reminders, hangouts, goals and
+redemptions all multiplied, which is why the demo account's XP kept climbing.
+Params are now only passed when there are some, so a multi-statement script goes
+down the exec path. Loading the scenario twice now leaves the figures identical.
+
+**The catalogue ran out.** Every reward cost 1,000 XP or less while the demo
+account held over ten thousand, so a top-tier customer could buy all of it — and
+the affordability filter, the "XP to go" label and a saved goal had nothing to
+act on. Two aspirational rewards close that: a $25 hawker bundle at 2,500, and a
+$150 travel voucher at 15,000 that even Kampung Spirit has to work toward.
+
+**A balance a top-tier customer would actually have.** Alex reached the top tier
+by accumulating and never spending. He now has a redemption history — nine
+past rewards, two still live in his wallet — which leaves lifetime XP just over
+eleven thousand and a spendable balance around three and a half. Same tier, a
+realistic balance, and a catalogue that still has something above it.
+
+---
+
 ## XP Rewards Store changes
 
 The store could tell you what you could afford and what you could not. It could

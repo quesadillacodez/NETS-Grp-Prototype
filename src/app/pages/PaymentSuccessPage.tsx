@@ -61,6 +61,10 @@ export function PaymentSuccessPage() {
     }
 
     const allUsers = getAllUsers();
+    // One shared timestamp for every reminder in THIS split. Each time you split
+    // a bill it becomes its own group, so running the same merchant twice makes
+    // two separate bills instead of one combined one.
+    const billCreatedDate = new Date().toISOString();
     const newReminders = friends
       .map((participant) => {
         const friendUser = allUsers.find(user => user.id === participant.userId)
@@ -75,6 +79,7 @@ export function PaymentSuccessPage() {
           fromUserId: currentUser.id, toUserId: friendUser.id,
           fromUserName: currentUser.name, toUserName: participant.name,
           totalBillAmount: amount, payerShare,
+          createdDate: billCreatedDate,
         };
       })
       .filter((reminder): reminder is NonNullable<typeof reminder> => reminder !== null);

@@ -133,9 +133,9 @@ function SharedBillsTab({ sharedBillsMap, currentUser }: { sharedBillsMap: Map<s
       {Array.from(sharedBillsMap.entries()).map(([key, reminders]) => {
         const first = reminders[0];
         const uniqueParticipants = new Set(reminders.map((r) => r.toUserId));
-        const billsByDate = new Map<string, number>();
-        reminders.forEach((r) => { if (r.totalBillAmount && !billsByDate.has(r.date)) billsByDate.set(r.date, r.totalBillAmount); });
-        const totalAmount = Array.from(billsByDate.values()).reduce((sum, v) => sum + v, 0);
+        // One split per group now, so the total is that split's own bill amount.
+        const totalAmount = reminders.find((r) => r.totalBillAmount)?.totalBillAmount
+          ?? reminders.reduce((sum, r) => sum + r.amount, 0);
         const participantTotals = new Map<string, { allPaid: boolean }>();
         reminders.forEach((r) => {
           if (participantTotals.has(r.toUserId)) participantTotals.get(r.toUserId)!.allPaid = participantTotals.get(r.toUserId)!.allPaid && r.status === 'paid';
@@ -330,7 +330,9 @@ export function ReminderDashboardPage() {
   const allReminders = getAllReminders();
   const allBillsMap = new Map<string, any[]>();
   allReminders.forEach((r: any) => {
-    const key = `${r.category}-${r.fromUserId}`;
+    // Group by merchant + payer + when the split was made, so running the same
+    // merchant twice shows as two separate bills instead of one combined one.
+    const key = `${r.category}-${r.fromUserId}-${r.createdDate ?? r.date}`;
     if (!allBillsMap.has(key)) allBillsMap.set(key, []);
     allBillsMap.get(key)!.push(r);
   });

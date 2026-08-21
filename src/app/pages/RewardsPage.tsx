@@ -40,7 +40,7 @@ import {
 } from '../utils/geo';
 import { useAppEvents } from '../utils/useAppEvents';
 import { LocationSheet } from '../components/LocationPicker';
-import { getLivePromotions, recordImpressions } from '../utils/promotionStorage';
+import { getLivePromotions, localisePromotions, recordImpressions } from '../utils/promotionStorage';
 import { getRedemptionCounts } from '../utils/merchantInsights';
 
 type RewardsTab = 'overview' | 'store' | 'wallet' | 'ledger' | 'history';
@@ -626,9 +626,14 @@ function StoreView({ userId, currentXP, onSelect, onChangeLocation }: {
   // store. A promoted reward is pinned above the listing and labelled; it keeps
   // its real XP price, its real distance and its real lock state, because a
   // merchant is buying position, not a different set of facts.
-  const live = getLivePromotions();
+  //
+  // Placements are localised first: a stall buys the customers near its outlet,
+  // so changing area changes which sponsored cards appear.
+  const live = localisePromotions(getLivePromotions(), userArea);
   const promotedIds = new Set(live.map(promotion => promotion.rewardId));
-  const spotlight = live.find(promotion => promotion.placement === 'spotlight') ?? null;
+  // One banner per lane, so a hawker and a chain can both be spotlighted.
+  const spotlights = live.filter(promotion => promotion.placement === 'spotlight');
+  const spotlight = spotlights[0] ?? null;
   const redemptionCounts = getRedemptionCounts();
 
   useEffect(() => {

@@ -13,9 +13,40 @@
 
 import { lastInsertId, query, queryOne, run } from './db';
 import { getRewardsCatalog, type Reward } from './rewardStorage';
+import { isHeartlandName } from './questStorage';
+import { DEFAULT_NEARBY_RADIUS_KM, distanceKm, resolveArea } from './geo';
 
 /** How many paid slots the store will show at once. */
-export const MAX_LIVE_PROMOTIONS = 3;
+export const MAX_LIVE_PROMOTIONS = 4;
+
+/**
+ * The spotlight is sold in two lanes.
+ *
+ * A single banner meant a chain with a marketing budget could hold it against
+ * every hawker stall in the country, which is the opposite of what a heartland
+ * payments network should sell. One lane is reserved for hawkers and heartland
+ * stalls, the other for chains, so both are always represented and neither
+ * outbids the other for the same slot.
+ */
+export type Lane = 'hawker' | 'brand';
+
+export const LANE_LABELS: Record<Lane, string> = {
+  hawker: 'Hawker & heartland',
+  brand: 'Brands & chains',
+};
+
+/** Which lane a merchant sells in, from its name. */
+export function laneFor(merchant: string): Lane {
+  return isHeartlandName(merchant) ? 'hawker' : 'brand';
+}
+
+/**
+ * A merchant may hold the spotlight for this many days out of the trailing
+ * window before it has to stand down.
+ */
+export const SPOTLIGHT_MAX_RUN_DAYS = 14;
+export const SPOTLIGHT_WINDOW_DAYS = 30;
+export const SPOTLIGHT_COOLDOWN_DAYS = 7;
 
 /** What a week of placement costs the merchant, by slot type. */
 export const PLACEMENT_RATES = {
@@ -110,6 +141,80 @@ export function chooseLivePromotions(promotions: Promotion[], now = Date.now()):
     .slice(0, MAX_LIVE_PROMOTIONS);
 }
 
+/**
+ * Narrows live placements to the ones that reach a customer standing in
+ * `viewerArea`.
+ *
+ * A placement is bought against the outlet the reward belongs to, so a stall in
+ * Ang Mo Kio is sold to people in Ang Mo Kio rather than to the whole island —
+ * that is what a heartland merchant is actually paying for. Rewards with no
+ * outlet, or with outlets everywhere, still reach everyone.
+ *
+ * The catalogue is a parameter so the rule can be tested without a database;
+ * the app leaves it to default.
+ */
+export function localisePromotions(
+  promotions: Promotion[],
+  viewerArea: string,
+  radiusKm = DEFAULT_NEARBY_RADIUS_KM,
+  catalogue: Pick<Reward, 'id' | 'area'>[] = getRewardsCatalog(),
+): Promotion[] {
+  const viewer = resolveArea(viewerArea).coordinates;
+  return promotions.filter(promotion => {
+    const reward = catalogue.find(entry => entry.id === promotion.rewardId);
+    // A reward that is gone from the catalogue keeps its placement rather than
+    // vanishing silently; the booking is still real and still billed.
+    if (!reward) return true;
+    const outlet = resolveArea(reward.area);
+    // No outlet, or outlets everywhere: nothing to localise against.
+    if (outlet.islandwide || !outlet.coordinates || !viewer) return true;
+    return distanceKm(viewer, outlet.coordinates) <= radiusKm;
+  });
+}
+
+/** The live spotlight for each lane — at most one hawker and one brand. */
+export function getSpotlightPromotions(now = Date.now()): Promotion[] {
+  const spotlights = getLivePromotions(now).filter(promotion => promotion.placement === 'spotlight');
+  const lanes: Lane[] = ['hawker', 'brand'];
+  return lanes
+    .map(lane => spotlights.find(promotion => laneFor(promotion.merchant) === lane))
+    .filter((promotion): promotion is Promotion => promotion !== undefined);
+}
+
+/**
+ * How long a merchant must wait before booking the spotlight again, or null if
+ * it is free to book now.
+ *
+ * Without this, a merchant could rebook the banner the moment its own placement
+ * ended and hold it indefinitely — the cap on concurrent slots does nothing
+ * against a single merchant booking back to back.
+ */
+export function spotlightCooldownUntil(
+  existing: Promotion[],
+  merchant: string,
+  now = Date.now(),
+): number | null {
+  const windowStart = now - SPOTLIGHT_WINDOW_DAYS * DAY;
+  const mine = existing.filter(promotion =>
+    promotion.placement === 'spotlight'
+    && promotion.merchant === merchant
+    && promotion.endsAt > windowStart);
+  if (mine.length === 0) return null;
+
+  // Days held inside the trailing window, clipped so a booking that started
+  // before it only counts the part that falls within.
+  const heldDays = mine.reduce((sum, promotion) => {
+    const from = Math.max(promotion.startsAt, windowStart);
+    const to = Math.min(promotion.endsAt, now);
+    return sum + Math.max(0, to - from) / DAY;
+  }, 0);
+  if (heldDays < SPOTLIGHT_MAX_RUN_DAYS) return null;
+
+  const lastEnd = Math.max(...mine.map(promotion => promotion.endsAt));
+  const until = lastEnd + SPOTLIGHT_COOLDOWN_DAYS * DAY;
+  return until > now ? until : null;
+}
+
 /** Only the placements a customer should be seeing right now. */
 export function getLivePromotions(now = Date.now()): Promotion[] {
   return chooseLivePromotions(getPromotions(), now);
@@ -135,7 +240,7 @@ export interface PromotionResult {
  */
 export function checkBooking(
   existing: Promotion[],
-  input: { rewardId: number; title: string; days: number; startsAt: number; placement: Placement },
+  input: { rewardId: number; title: string; merchant: string; days: number; startsAt: number; placement: Placement },
 ): { ok: boolean; reason?: string; endsAt: number } {
   const days = Math.round(input.days);
   const endsAt = input.startsAt + Math.max(0, days) * DAY;
@@ -150,16 +255,30 @@ export function checkBooking(
     return { ok: false, reason: `${input.title} is already promoted over those dates.`, endsAt };
   }
 
-  // There is only one banner, so only one merchant can be sold it at a time.
-  // Without this a second spotlight would be billed the higher rate and get
-  // nothing extra for it.
-  if (input.placement === 'spotlight'
-    && existing.some(promotion => promotion.placement === 'spotlight' && overlaps(promotion))) {
-    return {
-      ok: false,
-      reason: 'Another merchant already holds the spotlight over those dates. Book Featured instead.',
-      endsAt,
-    };
+  if (input.placement === 'spotlight') {
+    // One banner per lane, so a hawker booking never collides with a chain.
+    const lane = laneFor(input.merchant);
+    const taken = existing.some(promotion =>
+      promotion.placement === 'spotlight'
+      && laneFor(promotion.merchant) === lane
+      && overlaps(promotion));
+    if (taken) {
+      return {
+        ok: false,
+        reason: `The ${LANE_LABELS[lane].toLowerCase()} spotlight is taken over those dates. Book Featured instead.`,
+        endsAt,
+      };
+    }
+
+    const cooldownUntil = spotlightCooldownUntil(existing, input.merchant, input.startsAt);
+    if (cooldownUntil !== null && input.startsAt < cooldownUntil) {
+      const days = Math.ceil((cooldownUntil - input.startsAt) / DAY);
+      return {
+        ok: false,
+        reason: `You have held the spotlight for ${SPOTLIGHT_MAX_RUN_DAYS} of the last ${SPOTLIGHT_WINDOW_DAYS} days. It frees up again in ${days} day${days === 1 ? '' : 's'}.`,
+        endsAt,
+      };
+    }
   }
 
   // The cap applies to the busiest moment in the booked window, not to today,
@@ -185,7 +304,8 @@ export function bookPromotion(input: {
   const startsAt = input.startsAt ?? Date.now();
 
   const check = checkBooking(getPromotions(), {
-    rewardId: reward.id, title: reward.title, days: input.days, startsAt, placement,
+    rewardId: reward.id, title: reward.title, merchant: reward.merchant,
+    days: input.days, startsAt, placement,
   });
   if (!check.ok) return { ok: false, reason: check.reason };
   const endsAt = check.endsAt;

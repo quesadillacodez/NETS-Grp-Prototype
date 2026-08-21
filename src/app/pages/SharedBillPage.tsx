@@ -27,7 +27,13 @@ export function SharedBillPage() {
     }
 
     const allUsers = getAllUsers();
-    const reminders = getAllReminders().filter((r: any) => r.category === merchantName && r.fromUserId === payerId);
+    // Show ONLY the one split that was tapped. Match the same key the dashboard
+    // built (merchant + payer + when it was made), so two bills at the same
+    // merchant never combine. Falls back to merchant+payer if no billId came in.
+    const reminders = getAllReminders().filter((r: any) => {
+      if (billId) return `${r.category}-${r.fromUserId}-${r.createdDate ?? r.date}` === billId;
+      return r.category === merchantName && r.fromUserId === payerId;
+    });
 
     if (reminders.length === 0) {
       navigate('/reminders', { replace: true });
@@ -37,11 +43,10 @@ export function SharedBillPage() {
     const creditor = reminders[0];
     const creditorUser = allUsers.find((u: any) => u.id === creditor.fromUserId);
 
-    const billsByDate = new Map<string, number>();
-    reminders.forEach((r: any) => {
-      if (r.totalBillAmount && !billsByDate.has(r.date)) billsByDate.set(r.date, r.totalBillAmount);
-    });
-    const totalAmount = Array.from(billsByDate.values()).reduce((sum, v) => sum + v, 0);
+    // One split = one bill, so the total is that split's bill amount taken once
+    // (not summed across splits, which double-counted when bills combined).
+    const totalAmount = reminders.find((r: any) => r.totalBillAmount)?.totalBillAmount
+      ?? reminders.reduce((sum: number, r: any) => sum + r.amount, 0);
 
     const participantMap = new Map<string, any>();
     reminders.forEach((r: any) => {

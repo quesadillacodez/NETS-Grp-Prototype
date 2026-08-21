@@ -606,6 +606,18 @@ export async function initDatabase(): Promise<void> {
     console.warn('daily_logins migration skipped:', e);
   }
 
+  // merchant_items gained a category column after the initial release. Older
+  // databases have the table without it, so queries that ORDER BY category fail.
+  try {
+    const cols = db.exec('PRAGMA table_info(merchant_items)');
+    const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];
+    if (names.length > 0 && !names.includes('category')) {
+      db.run('ALTER TABLE merchant_items ADD COLUMN category TEXT');
+    }
+  } catch (e) {
+    console.warn('merchant_items.category migration skipped:', e);
+  }
+
   try {
     const cols = db.exec('PRAGMA table_info(reminders)');
     const names = cols.length ? cols[0].values.map(v => String(v[1])) : [];

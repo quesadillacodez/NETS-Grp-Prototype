@@ -5,6 +5,39 @@ commit it landed in so a change can be traced back to its diff.
 
 ---
 
+## Sponsored slots get a lane, a neighbourhood and a cooldown
+
+Three changes to paid placement, plus a teammate's split-bill work.
+
+**Two spotlight lanes.** There was one banner, so a chain with a marketing
+budget could hold it against every hawker stall in the country — the opposite of
+what a heartland payments network should be selling. The spotlight is now sold
+in two lanes, hawker and brand, decided by the merchant's own name. One of each
+runs at a time, so a chain and a stall are always both represented and neither
+outbids the other for the same slot. The concurrent cap rises from three to four
+to make room.
+
+**Placements are local.** A stall was paying for the whole island. A placement
+now reaches customers within range of the outlet its reward belongs to, so an
+Ang Mo Kio customer sees the Cheng San stall and a Woodlands customer sees
+Marsiling — neither sees the other's. Chains and rewards with no outlet still
+reach everyone. Two neighbourhood stalls were added to the catalogue so the rule
+has something to demonstrate.
+
+**A cooldown on the banner.** The cap on concurrent slots did nothing against one
+merchant rebooking the spotlight the moment its own placement ended. A merchant
+that has held it for 14 days out of the last 30 now stands down for a week
+before booking it again. The cooldown is on the banner only — the same merchant
+can still buy a featured slot meanwhile.
+
+**Split bills, from AnNi.** Each split is now its own bill, keyed by merchant,
+payer and when it was made. Splitting the same merchant twice used to merge into
+one combined bill with a double-counted total; the dashboard, the shared bill
+screen and the demo scenario all now treat one split as one bill. Includes her
+migration for older databases missing `merchant_items.category`.
+
+---
+
 ## The split mission fired on any payment, and Alex started below the top tier
 
 Two things found by exercising the missions in the running app rather than

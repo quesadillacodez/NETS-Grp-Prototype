@@ -193,20 +193,23 @@ export function loadPresentationScenario(): DemoScenarioSummary {
     category: 'Food & Dining', kind: 'purchase', createdAt: daysAgo(1),
   }]);
 
+  // Both debtors are in the SAME split, so they share one createdDate and group
+  // into a single bill.
+  const dtfCreatedDate = isoDaysAgo(1);
   const openReminderIds = addReminders([
     {
       fromUserId: ALEX, toUserId: SARAH, fromUserName: 'Alex Chen', toUserName: 'Sarah Tan',
       name: 'Sarah Tan', amount: share, status: 'pending', date: isoDaysAgo(1),
       category: 'Din Tai Fung', avatar: sarah?.avatar ?? '👩',
       totalBillAmount: openBill, payerShare: share, reminderCount: 0,
-      createdDate: isoDaysAgo(1),
+      createdDate: dtfCreatedDate,
     },
     {
       fromUserId: ALEX, toUserId: MIKE, fromUserName: 'Alex Chen', toUserName: 'Mike Wong',
       name: 'Mike Wong', amount: share, status: 'pending', date: isoDaysAgo(1),
       category: 'Din Tai Fung', avatar: mike?.avatar ?? '👨',
       totalBillAmount: openBill, payerShare: share, reminderCount: 0,
-      createdDate: isoDaysAgo(1),
+      createdDate: dtfCreatedDate,
     },
   ]);
 

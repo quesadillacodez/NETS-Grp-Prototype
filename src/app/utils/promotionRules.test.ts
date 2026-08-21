@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_LIVE_PROMOTIONS, PLACEMENT_RATES, calculateReport, checkBooking,
-  chooseLivePromotions, promotionStatus, type Placement, type Promotion,
+  MAX_LIVE_PROMOTIONS, PLACEMENT_RATES, SPOTLIGHT_COOLDOWN_DAYS, calculateReport,
+  checkBooking, chooseLivePromotions, laneFor, localisePromotions, promotionStatus,
+  spotlightCooldownUntil, type Placement, type Promotion,
 } from './promotionStorage';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -83,7 +84,7 @@ describe('choosing what the store shows', () => {
 
 describe('booking a slot', () => {
   const booking = {
-    rewardId: 99, title: 'Free Curry Puff', days: 7, startsAt: NOW,
+    rewardId: 99, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA', days: 7, startsAt: NOW,
     placement: 'featured' as const,
   };
 
@@ -106,15 +107,40 @@ describe('booking a slot', () => {
     expect(checkBooking(existing, booking).ok).toBe(true);
   });
 
-  it('sells the banner to one merchant at a time', () => {
-    // Spotlight is featured placement plus the single banner at the top of the
-    // store. A second one would be billed the higher rate for nothing extra.
-    const held = [promo({ rewardId: 1, placement: 'spotlight', startsAt: NOW, endsAt: NOW + 7 * DAY })];
+  it('sells each lane\'s banner to one merchant at a time', () => {
+    // LiHO holds the brand banner, so another brand cannot also be sold it.
+    const held = [promo({
+      rewardId: 1, merchant: 'LiHO TEA', placement: 'spotlight',
+      startsAt: NOW, endsAt: NOW + 7 * DAY,
+    })];
     expect(checkBooking(held, { ...booking, placement: 'spotlight' }).reason)
-      .toMatch(/already holds the spotlight/i);
+      .toMatch(/spotlight is taken/i);
 
     // The same dates are still available as a featured slot.
     expect(checkBooking(held, booking).ok).toBe(true);
+  });
+
+  it('keeps a hawker banner available while a chain holds the brand one', () => {
+    // The whole point of two lanes: a chain's budget cannot shut every hawker
+    // out of the spotlight.
+    const brandHolds = [promo({
+      rewardId: 1, merchant: 'LiHO TEA', placement: 'spotlight',
+      startsAt: NOW, endsAt: NOW + 7 * DAY,
+    })];
+    const hawkerBooking = {
+      ...booking, rewardId: 42, merchant: 'Kopitiam', title: '$3 Coffee Voucher',
+      placement: 'spotlight' as const,
+    };
+    expect(checkBooking(brandHolds, hawkerBooking).ok).toBe(true);
+
+    // And a second hawker cannot take the lane once it is held.
+    const bothHeld = [...brandHolds, promo({
+      rewardId: 42, merchant: 'Kopitiam', placement: 'spotlight',
+      startsAt: NOW, endsAt: NOW + 7 * DAY,
+    })];
+    expect(checkBooking(bothHeld, {
+      ...hawkerBooking, rewardId: 43, merchant: 'Hawker Centres',
+    }).reason).toMatch(/spotlight is taken/i);
   });
 
   it('refuses to oversell the slots', () => {
@@ -169,5 +195,111 @@ describe('what the merchant is billed and what they got', () => {
 
   it('prices spotlight above featured, or there is nothing to upgrade to', () => {
     expect(PLACEMENT_RATES.spotlight).toBeGreaterThan(PLACEMENT_RATES.featured);
+  });
+});
+
+describe('spotlight cooldown', () => {
+  const spotlight = (merchant: string, from: number, to: number) =>
+    promo({ merchant, placement: 'spotlight', startsAt: from, endsAt: to });
+
+  it('lets a merchant book again after a short run', () => {
+    const held = [spotlight('LiHO TEA', NOW - 10 * DAY, NOW - 3 * DAY)]; // 7 days
+    expect(spotlightCooldownUntil(held, 'LiHO TEA', NOW)).toBeNull();
+  });
+
+  it('stands a merchant down once it has held the banner too long', () => {
+    // 20 days inside the trailing 30, over the 14-day allowance.
+    const held = [spotlight('LiHO TEA', NOW - 22 * DAY, NOW - 2 * DAY)];
+    const until = spotlightCooldownUntil(held, 'LiHO TEA', NOW);
+    expect(until).toBe(NOW - 2 * DAY + SPOTLIGHT_COOLDOWN_DAYS * DAY);
+  });
+
+  it('adds up consecutive bookings rather than judging them one at a time', () => {
+    // Three back-to-back weeks is how a merchant would hold the slot without
+    // any single booking looking long.
+    const held = [
+      spotlight('LiHO TEA', NOW - 21 * DAY, NOW - 14 * DAY),
+      spotlight('LiHO TEA', NOW - 14 * DAY, NOW - 7 * DAY),
+      spotlight('LiHO TEA', NOW - 7 * DAY, NOW),
+    ];
+    expect(spotlightCooldownUntil(held, 'LiHO TEA', NOW)).not.toBeNull();
+  });
+
+  it('only counts the days that fall inside the trailing window', () => {
+    // A long run that finished well before the window should not still bite.
+    const held = [spotlight('LiHO TEA', NOW - 80 * DAY, NOW - 40 * DAY)];
+    expect(spotlightCooldownUntil(held, 'LiHO TEA', NOW)).toBeNull();
+  });
+
+  it('judges each merchant separately', () => {
+    const held = [spotlight('LiHO TEA', NOW - 22 * DAY, NOW - 2 * DAY)];
+    expect(spotlightCooldownUntil(held, 'Kopitiam', NOW)).toBeNull();
+  });
+
+  it('refuses the booking while the cooldown is running', () => {
+    const held = [spotlight('LiHO TEA', NOW - 22 * DAY, NOW - 2 * DAY)];
+    const result = checkBooking(held, {
+      rewardId: 99, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA',
+      days: 7, startsAt: NOW, placement: 'spotlight',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/held the spotlight/i);
+  });
+
+  it('lets the same merchant book a featured slot during the cooldown', () => {
+    // The cooldown is on the banner, not on advertising altogether.
+    const held = [spotlight('LiHO TEA', NOW - 22 * DAY, NOW - 2 * DAY)];
+    expect(checkBooking(held, {
+      rewardId: 99, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA',
+      days: 7, startsAt: NOW, placement: 'featured',
+    }).ok).toBe(true);
+  });
+});
+
+describe('spotlight lanes', () => {
+  it('reads a merchant\'s lane from its name', () => {
+    expect(laneFor('Kopitiam')).toBe('hawker');
+    expect(laneFor('Hawker Centres')).toBe('hawker');
+    expect(laneFor('Tiong Bahru Chicken Rice')).toBe('hawker');
+    expect(laneFor('LiHO TEA')).toBe('brand');
+    expect(laneFor('Grab')).toBe('brand');
+    expect(laneFor('Popular Bookstore')).toBe('brand');
+  });
+});
+
+describe('localising placements', () => {
+  // A stall buys the customers near its outlet.
+  const catalogue = [
+    { id: 13, area: 'Ang Mo Kio' },   // Cheng San stall
+    { id: 14, area: 'Woodlands' },    // Marsiling stall
+    { id: 8, area: 'Multiple outlets' }, // a chain
+    { id: 1 },                        // wallet cashback, no outlet
+  ];
+  const promoFor = (rewardId: number) =>
+    promo({ rewardId, startsAt: NOW - DAY, endsAt: NOW + DAY });
+  const seenFrom = (area: string, ids: number[]) =>
+    localisePromotions(ids.map(promoFor), area, 5, catalogue).map(p => p.rewardId);
+
+  it('shows an estate stall to someone in that estate', () => {
+    expect(seenFrom('Ang Mo Kio', [13])).toEqual([13]);
+  });
+
+  it('hides it from someone in another estate', () => {
+    expect(seenFrom('Woodlands', [13])).toEqual([]);
+  });
+
+  it('gives each estate its own stall', () => {
+    expect(seenFrom('Ang Mo Kio', [13, 14])).toEqual([13]);
+    expect(seenFrom('Woodlands', [13, 14])).toEqual([14]);
+  });
+
+  it('still reaches everyone for a chain or a reward with no outlet', () => {
+    expect(seenFrom('Woodlands', [8, 1])).toEqual([8, 1]);
+    expect(seenFrom('Ang Mo Kio', [8, 1])).toEqual([8, 1]);
+  });
+
+  it('keeps a placement whose reward has left the catalogue', () => {
+    // The booking is real and still billed, so it must not vanish silently.
+    expect(seenFrom('Woodlands', [99999])).toEqual([99999]);
   });
 });

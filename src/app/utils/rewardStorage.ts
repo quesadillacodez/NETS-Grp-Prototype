@@ -166,6 +166,11 @@ export const REWARDS: Reward[] = [
   { id: 7, merchant: 'Ya Kun Kaya Toast', title: '$5 Breakfast Set', xpCost: 450, category: 'Partner Deals', icon: '🍞', tags: ['Food'], description: 'Redeem a selected traditional breakfast set.', validityDays: 30, area: 'Raffles Place' },
   { id: 8, merchant: 'Grab', title: '$10 Ride Credit', xpCost: 1000, category: 'Partner Deals', icon: '🚗', tags: ['Travel'], description: 'Receive a digital ride credit code in your rewards wallet.', validityDays: 45, area: 'Multiple outlets' },
   { id: 9, merchant: 'Popular Bookstore', title: '15% Off Stationery', xpCost: 600, category: 'Partner Deals', icon: '📚', tags: ['Campus'], description: 'Save on one stationery purchase at participating outlets.', validityDays: 30, area: 'Bras Basah' },
+  // Neighbourhood stalls, each tied to one estate. These are what make a
+  // sponsored slot local: an Ang Mo Kio customer sees Cheng San, a Woodlands
+  // customer sees Marsiling, and neither sees the other's.
+  { id: 13, merchant: 'Cheng San Nasi Lemak', title: '$2 Off Nasi Lemak Set', xpCost: 200, category: 'Vouchers', icon: '🍚', tags: ['Local', 'Food'], description: 'Redeem on one nasi lemak set at the Cheng San Market stall.', validityDays: 30, area: 'Ang Mo Kio' },
+  { id: 14, merchant: 'Marsiling Mee Pok', title: '$2 Off Mee Pok Bowl', xpCost: 200, category: 'Vouchers', icon: '🍜', tags: ['Local', 'Food'], description: 'Redeem on one bowl at the Marsiling hawker stall.', validityDays: 30, area: 'Woodlands' },
   { id: 10, merchant: 'LiHO TEA', title: '1-for-1 Medium Milk Tea', xpCost: 350, category: 'Partner Deals', icon: '🧋', tags: ['Drinks'], description: 'Redeem one complimentary medium drink with purchase.', validityDays: 14, area: 'Orchard' },
   { id: 11, merchant: 'FairPrice', title: '$8 Grocery Voucher', xpCost: 800, category: 'Vouchers', icon: '🛒', tags: ['Essentials'], description: 'Use on a minimum $40 grocery purchase.', validityDays: 30, area: 'Toa Payoh' },
   { id: 12, merchant: 'NETS Wallet', title: '$10 Wallet Cashback', xpCost: 1000, category: 'Cashback', icon: '💵', tags: ['Instant'], description: 'Credit $10 directly to your NETS wallet balance.', validityDays: 0 },

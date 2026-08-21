@@ -110,12 +110,19 @@ test.describe('Selling a placement', () => {
 
   test('the store refuses to oversell its paid slots', async ({ page }) => {
     await openRewardsAdmin(page);
-    await promote(page, /Free Curry Puff/, 'Featured');
-    await promote(page, /1-for-1 Medium Milk Tea/, 'Featured');
-    await promote(page, /15% Off Stationery/, 'Featured');
 
-    // A fourth booking over the same dates has nowhere to go.
-    await promote(page, /\$3 Coffee Voucher/, 'Featured');
+    // Fill every slot the store sells (MAX_LIVE_PROMOTIONS in
+    // promotionStorage), then book one more over the same dates.
+    for (const reward of [
+      /Free Curry Puff/,
+      /1-for-1 Medium Milk Tea/,
+      /15% Off Stationery/,
+      /\$3 Coffee Voucher/,
+    ]) {
+      await promote(page, reward, 'Featured');
+    }
+
+    await promote(page, /\$5 Breakfast Set/, 'Featured');
     await expect(page.getByRole('alert')).toContainText(/slots are taken/i);
   });
 

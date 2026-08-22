@@ -276,30 +276,34 @@ export function loadPresentationScenario(): DemoScenarioSummary {
   const redemptions: {
     userId: string; rewardId: number; title: string; merchant: string;
     xpCost: number; days: number; used: boolean; validityDays: number;
+    // Stated rather than derived from array position: a voucher's code is
+    // quoted in tests and printed on a QR, so inserting a row above it must
+    // never rename it.
+    refCode: string;
   }[] = [
     // Alex redeemed a coffee voucher, then paid at Kopitiam two days later.
-    { userId: ALEX, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 28, used: true, validityDays: 30 },
+    { userId: ALEX, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 28, used: true, validityDays: 30 , refCode: 'XP-DEMO01' },
     // And a milk tea deal, then paid at LiHO three days later.
-    { userId: ALEX, rewardId: 10, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA', xpCost: 350, days: 5, used: true, validityDays: 14 },
-    { userId: ALEX, rewardId: 1, title: '$5 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 500, days: 7, used: true, validityDays: 0 },
+    { userId: ALEX, rewardId: 10, title: '1-for-1 Medium Milk Tea', merchant: 'LiHO TEA', xpCost: 350, days: 5, used: true, validityDays: 14 , refCode: 'XP-DEMO02' },
+    { userId: ALEX, rewardId: 1, title: '$5 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 500, days: 7, used: true, validityDays: 0 , refCode: 'XP-DEMO03' },
     // A top-tier customer has been spending, not just accumulating. Without a
     // redemption history the balance only ever grows, the whole catalogue is
     // affordable, and the affordability filter and a saved goal have nothing
     // to act on. The last two are left unused so the wallet holds live vouchers.
-    { userId: ALEX, rewardId: 8, title: '$10 Ride Credit', merchant: 'Grab', xpCost: 1000, days: 21, used: true, validityDays: 45 },
-    { userId: ALEX, rewardId: 11, title: '$8 Grocery Voucher', merchant: 'FairPrice', xpCost: 800, days: 18, used: true, validityDays: 30 },
-    { userId: ALEX, rewardId: 9, title: '15% Off Stationery', merchant: 'Popular Bookstore', xpCost: 600, days: 16, used: true, validityDays: 30 },
-    { userId: ALEX, rewardId: 12, title: '$10 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 1000, days: 14, used: true, validityDays: 0 },
-    { userId: ALEX, rewardId: 15, title: '$25 Hawker Feast Bundle', merchant: 'Hawker Centres', xpCost: 2500, days: 12, used: true, validityDays: 60 },
-    { userId: ALEX, rewardId: 7, title: '$5 Breakfast Set', merchant: 'Ya Kun Kaya Toast', xpCost: 450, days: 9, used: true, validityDays: 30 },
-    { userId: ALEX, rewardId: 4, title: '$2 Off Chicken Rice Set', merchant: 'Tiong Bahru Chicken Rice', xpCost: 200, days: 6, used: true, validityDays: 30 },
-    { userId: ALEX, rewardId: 5, title: 'Free Curry Puff', merchant: 'Old Chang Kee', xpCost: 180, days: 4, used: false, validityDays: 14 },
-    { userId: ALEX, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 2, used: false, validityDays: 30 },
-    { userId: SARAH, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 10, used: false, validityDays: 30 },
-    { userId: MIKE, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 8, used: false, validityDays: 30 },
+    { userId: ALEX, rewardId: 8, title: '$10 Ride Credit', merchant: 'Grab', xpCost: 1000, days: 21, used: true, validityDays: 45 , refCode: 'XP-DEMO06' },
+    { userId: ALEX, rewardId: 11, title: '$8 Grocery Voucher', merchant: 'FairPrice', xpCost: 800, days: 18, used: true, validityDays: 30 , refCode: 'XP-DEMO07' },
+    { userId: ALEX, rewardId: 9, title: '15% Off Stationery', merchant: 'Popular Bookstore', xpCost: 600, days: 16, used: true, validityDays: 30 , refCode: 'XP-DEMO08' },
+    { userId: ALEX, rewardId: 12, title: '$10 Wallet Cashback', merchant: 'NETS Wallet', xpCost: 1000, days: 14, used: true, validityDays: 0 , refCode: 'XP-DEMO09' },
+    { userId: ALEX, rewardId: 15, title: '$25 Hawker Feast Bundle', merchant: 'Hawker Centres', xpCost: 2500, days: 12, used: true, validityDays: 60 , refCode: 'XP-DEMO10' },
+    { userId: ALEX, rewardId: 7, title: '$5 Breakfast Set', merchant: 'Ya Kun Kaya Toast', xpCost: 450, days: 9, used: true, validityDays: 30 , refCode: 'XP-DEMO11' },
+    { userId: ALEX, rewardId: 4, title: '$2 Off Chicken Rice Set', merchant: 'Tiong Bahru Chicken Rice', xpCost: 200, days: 6, used: true, validityDays: 30 , refCode: 'XP-DEMO12' },
+    { userId: ALEX, rewardId: 5, title: 'Free Curry Puff', merchant: 'Old Chang Kee', xpCost: 180, days: 4, used: false, validityDays: 14 , refCode: 'XP-DEMO13' },
+    { userId: ALEX, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 2, used: false, validityDays: 30 , refCode: 'XP-DEMO14' },
+    { userId: SARAH, rewardId: 2, title: '$5 Heartland Voucher', merchant: 'Hawker Centres', xpCost: 500, days: 10, used: false, validityDays: 30 , refCode: 'XP-DEMO04' },
+    { userId: MIKE, rewardId: 6, title: '$3 Coffee Voucher', merchant: 'Kopitiam', xpCost: 300, days: 8, used: false, validityDays: 30 , refCode: 'XP-DEMO05' },
   ];
 
-  redemptions.forEach((redemption, index) => {
+  redemptions.forEach(redemption => {
     const redeemedAt = daysAgo(redemption.days);
     run(
       `INSERT INTO reward_redemptions
@@ -307,7 +311,7 @@ export function loadPresentationScenario(): DemoScenarioSummary {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         redemption.userId, redemption.rewardId, redemption.title, redemption.merchant,
-        redemption.xpCost, `XP-DEMO${String(index + 1).padStart(2, '0')}`, redeemedAt,
+        redemption.xpCost, redemption.refCode, redeemedAt,
         redemption.used ? 1 : 0,
         redemption.validityDays > 0 ? redeemedAt + redemption.validityDays * 24 * 60 * 60 * 1000 : 0,
         redemption.used ? redeemedAt + 60 * 60 * 1000 : null,

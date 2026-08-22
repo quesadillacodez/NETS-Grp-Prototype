@@ -10,7 +10,25 @@ let sqlModule: Awaited<ReturnType<typeof initSqlJs>> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let cloudSyncInFlight = false;
+let cloudSyncQueued = false;
 const CLOUD_REVISION_KEY = 'nets-cloud-database-revision';
+// Set the moment anything is written locally, cleared only once the server has
+// accepted that copy. It lives in localStorage so it survives a reload: a
+// device that closed with writes still unpublished must not be talked into
+// throwing them away by a server copy that never saw them.
+const CLOUD_DIRTY_KEY = 'nets-cloud-database-dirty';
+
+function markLocalWrite(): void {
+  try { localStorage.setItem(CLOUD_DIRTY_KEY, '1'); } catch { /* storage unavailable */ }
+}
+
+function hasUnpublishedWrites(): boolean {
+  try { return localStorage.getItem(CLOUD_DIRTY_KEY) === '1'; } catch { return false; }
+}
+
+function clearUnpublishedWrites(): void {
+  try { localStorage.removeItem(CLOUD_DIRTY_KEY); } catch { /* storage unavailable */ }
+}
 
 function openIndexedDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -664,6 +682,7 @@ export async function initDatabase(): Promise<void> {
 }
 
 function scheduleSave(): void {
+  markLocalWrite();
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     if (!db) return;
@@ -723,13 +742,19 @@ async function importCloudDatabase(sqlite: string, revision: number): Promise<vo
   db?.close();
   db = candidate;
   localStorage.setItem(CLOUD_REVISION_KEY, String(revision));
+  // The local copy is now exactly the server's, so there is nothing outstanding.
+  clearUnpublishedWrites();
   await saveBytes(db.export());
   window.dispatchEvent(new CustomEvent('databaseReady'));
 }
 
 async function syncDatabaseToServer(): Promise<void> {
   if (import.meta.env.VITE_DISABLE_CLOUD_SYNC === 'true') return;
-  if (!db || cloudSyncInFlight || !localStorage.getItem('nets-session-user-id')) return;
+  if (!db || !localStorage.getItem('nets-session-user-id')) return;
+  // A sync that starts while one is running used to be dropped, stranding
+  // whatever had just been written. Remember it instead and run it after.
+  if (cloudSyncInFlight) { cloudSyncQueued = true; return; }
+
   cloudSyncInFlight = true;
   try {
     scrubClientCredentials();
@@ -741,16 +766,32 @@ async function syncDatabaseToServer(): Promise<void> {
       body: JSON.stringify({ revision, sqlite: bytesToBase64(db.export()) }),
     });
     const body = await response.json().catch(() => ({}));
-    if (response.status === 409 && body.state?.sqlite) {
-      await importCloudDatabase(body.state.sqlite, Number(body.state.revision));
+
+    // Someone else published while this device was writing. Adopting their copy
+    // here is what made a repayment vanish seconds after it was recorded: the
+    // whole local database, including the write being published, was thrown
+    // away. Take their revision and publish again on top of it, so the data on
+    // the device in front of the user is never the data that gets discarded.
+    if (response.status === 409 && body.state) {
+      localStorage.setItem(CLOUD_REVISION_KEY, String(body.state.revision));
+      cloudSyncQueued = true;
       window.dispatchEvent(new CustomEvent('cloudSyncConflict'));
       return;
     }
-    if (response.ok) localStorage.setItem(CLOUD_REVISION_KEY, String(body.revision));
+
+    if (response.ok) {
+      localStorage.setItem(CLOUD_REVISION_KEY, String(body.revision));
+      clearUnpublishedWrites();
+    }
   } catch (error) {
+    // Left dirty on purpose, so the next successful sync carries this copy.
     console.warn('Cloud database sync paused:', error);
   } finally {
     cloudSyncInFlight = false;
+    if (cloudSyncQueued) {
+      cloudSyncQueued = false;
+      scheduleCloudSync();
+    }
   }
 }
 
@@ -763,11 +804,20 @@ export async function synchronizeDatabaseWithServer(): Promise<void> {
     if (!response.ok) return;
     const state = await response.json() as { revision: number; sqlite: string | null };
     const localRevision = Number(localStorage.getItem(CLOUD_REVISION_KEY) || 0);
-    if (state.sqlite && state.revision > localRevision) {
+
+    // Hydrating replaces everything held locally, so it is only safe while this
+    // device has nothing of its own that the server has not accepted. A device
+    // that has never published (revision 0) holds nothing but seed data and
+    // should always hydrate — signing in itself writes the day's check-in, so
+    // "dirty" alone would keep a new device from ever receiving the data.
+    const wouldLoseLocalWork = localRevision > 0 && hasUnpublishedWrites();
+    if (state.sqlite && state.revision > localRevision && !wouldLoseLocalWork) {
       await importCloudDatabase(state.sqlite, state.revision);
       return;
     }
-    if (!state.sqlite) await syncDatabaseToServer();
+    // Publish instead: a reload is not a reason to lose a repayment recorded
+    // before the last sync could carry it.
+    if (!state.sqlite || wouldLoseLocalWork) await syncDatabaseToServer();
   } catch (error) {
     console.warn('Cloud database hydration unavailable:', error);
   }

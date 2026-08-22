@@ -1,4 +1,5 @@
 import { query, run, lastInsertId } from './db';
+import { deleteNotificationByReminder } from './notificationStorage';
 
 export interface Reminder {
   id: number;
@@ -113,6 +114,53 @@ export function addReminders(newReminders: Omit<Reminder, 'id'>[]): number[] {
   }
   notifyUpdated();
   return ids;
+}
+
+/**
+ * What became of a bill when its split was confirmed again.
+ *
+ * `unchanged` is the common case of simply returning to a receipt: the same
+ * split is already on file, so nothing is rewritten and no friend is notified
+ * twice.
+ */
+export type BillSplitUpdate =
+  | { status: 'replaced'; ids: number[] }
+  | { status: 'unchanged' }
+  | { status: 'settled' };
+
+function splitShape(reminders: Pick<Reminder, 'toUserId' | 'amount'>[]): string {
+  return reminders
+    .map(reminder => `${reminder.toUserId}:${reminder.amount.toFixed(2)}`)
+    .sort()
+    .join('|');
+}
+
+/**
+ * Rewrite the reminders for one bill.
+ *
+ * Confirming a split a second time — going back from the receipt and paying
+ * again, which a swipe-back on a phone makes easy — is the user restating how
+ * one payment is shared, not a second payment. The rows for that bill are
+ * replaced so the shared bill shows what was last confirmed; previously the
+ * write was dropped and the receipt still announced that friends had been
+ * added, so the split appeared to have vanished.
+ *
+ * A bill someone has already settled is left untouched and reported back as
+ * such: replacing it would erase a repayment that really happened.
+ */
+export function replaceRemindersForBill(
+  billId: string,
+  replacements: Omit<Reminder, 'id'>[],
+): BillSplitUpdate {
+  const existing = query('SELECT * FROM reminders WHERE bill_id = ?', [billId]).map(rowToReminder);
+  if (existing.some(reminder => reminder.status === 'paid')) return { status: 'settled' };
+  if (existing.length > 0 && splitShape(existing) === splitShape(replacements)) return { status: 'unchanged' };
+
+  // The notifications point at reminder ids, so they go with the rows they name
+  // rather than being left to link nowhere.
+  for (const reminder of existing) deleteNotificationByReminder(reminder.id);
+  run('DELETE FROM reminders WHERE bill_id = ?', [billId]);
+  return { status: 'replaced', ids: addReminders(replacements) };
 }
 
 export function updateReminderStatus(id: number, status: Reminder['status']): void {

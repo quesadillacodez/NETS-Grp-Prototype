@@ -31,7 +31,14 @@ export function QRScanPage() {
   const location = useLocation();
   const incoming = (location.state as ScanState | null) ?? null;
 
-  const [paymentId] = useState(() => incoming?.paymentId ?? createPaymentId());
+  // A payment id identifies one payment, and the screens after this one treat it
+  // as such: the receipt refuses to record a payment whose id it has already
+  // seen. It is therefore minted here, once per payment put up for
+  // confirmation, and never inherited from navigation state — returning to this
+  // screen from the split flow (its back arrow pushes /scan carrying the state)
+  // used to hand the next payment the id of one already recorded, and that
+  // payment was then dropped in silence.
+  const [paymentId, setPaymentId] = useState(createPaymentId);
   const [amount, setAmount] = useState(() => incoming?.amount?.toFixed(2) ?? '');
   const [merchantName, setMerchantName] = useState(() => incoming?.merchantName ?? '');
   const [reference, setReference] = useState(() => incoming?.reference ?? '');
@@ -176,6 +183,7 @@ export function QRScanPage() {
 
     setIsGenerating(true);
     setQr(null);
+    setPaymentId(createPaymentId());
 
     try {
       const result = await requestNetsQr(parsedAmount, undefined, 0, ref);

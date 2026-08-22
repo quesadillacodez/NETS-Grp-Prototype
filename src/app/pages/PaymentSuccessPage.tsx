@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Home, Bell } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { addTransaction, formatDateForTransaction, hasProcessedPayment, markPaymentProcessed } from '../utils/transactionStorage';
-import { addReminders, getAllReminders } from '../utils/reminderStorage';
+import { addReminders, getAllReminders, replaceRemindersForBill } from '../utils/reminderStorage';
 import { getCurrentUser, getAllUsers } from '../utils/userStorage';
 import { addNotification } from '../utils/notificationStorage';
 import { payHangout } from '../utils/hangoutStorage';
@@ -30,6 +30,13 @@ export function PaymentSuccessPage() {
   };
   const paymentId = state?.paymentId ?? '';
 
+  // What this visit to the receipt actually did. Landing here again for a
+  // payment already on file — a swipe back from the receipt and another tap of
+  // Pay — must not be dressed up as a fresh split: saying "friends have been
+  // added" when nothing was written is what made a re-confirmed split look like
+  // it had disappeared.
+  const [outcome, setOutcome] = useState<'recorded' | 'resplit' | 'unchanged' | 'settled'>('recorded');
+
   const friends = participants.filter(participant => participant.status !== 'host');
   const yourShare = participants.find(participant => participant.status === 'host')?.amount || (amount / participants.length);
 
@@ -37,23 +44,30 @@ export function PaymentSuccessPage() {
     const currentUser = getCurrentUser();
     celebrate(confetti, { particleCount: 80, spread: 60, origin: { y: 0.5 }, colors: ['#1e2a4a', '#4f5d7a', '#047857'] });
 
-    if (!paymentId || hasProcessedPayment(paymentId)) return;
+    if (!paymentId) return;
 
-    addTransaction({
-      name: merchantName,
-      amount: -amount,
-      date: formatDateForTransaction(),
-      category: resolvePaymentCategory(merchantName, state ?? undefined),
-      kind: 'purchase',
-      paymentId,
-    }, currentUser.id);
-    recordMerchantSale({
-      merchantName,
-      itemName: state?.reference,
-      amount,
-      userId: currentUser.id,
-      paymentId,
-    });
+    // One payment, one debit: a payment already on file is never charged again.
+    // The split it pays for can still be restated, so the rest of this runs.
+    const alreadyRecorded = hasProcessedPayment(paymentId);
+    if (alreadyRecorded) {
+      setOutcome('unchanged');
+    } else {
+      addTransaction({
+        name: merchantName,
+        amount: -amount,
+        date: formatDateForTransaction(),
+        category: resolvePaymentCategory(merchantName, state ?? undefined),
+        kind: 'purchase',
+        paymentId,
+      }, currentUser.id);
+      recordMerchantSale({
+        merchantName,
+        itemName: state?.reference,
+        amount,
+        userId: currentUser.id,
+        paymentId,
+      });
+    }
 
     if (friends.length === 0) {
       markPaymentProcessed(paymentId);
@@ -98,7 +112,22 @@ export function PaymentSuccessPage() {
       .filter((reminder): reminder is NonNullable<typeof reminder> => reminder !== null);
 
     if (newReminders.length > 0) {
-      const reminderIds = new Set(addReminders(newReminders));
+      let written: number[];
+      if (alreadyRecorded) {
+        const update = replaceRemindersForBill(paymentId, newReminders);
+        // Nothing to write when this is the split already on file, or when a
+        // friend has started settling up and rewriting would erase that.
+        if (update.status !== 'replaced') {
+          setOutcome(update.status);
+          return;
+        }
+        setOutcome('resplit');
+        written = update.ids;
+      } else {
+        written = addReminders(newReminders);
+      }
+
+      const reminderIds = new Set(written);
       const latest = getAllReminders().filter(reminder => reminderIds.has(reminder.id));
       latest.forEach((reminder) => {
         addNotification({
@@ -119,6 +148,19 @@ export function PaymentSuccessPage() {
 
   if (!state) return null;
 
+  const friendCount = `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'}`;
+  // One line that says what became of this split, so a bill that was already
+  // paid reads as exactly that rather than as a new one that failed to appear.
+  const splitNote = friends.length === 0
+    ? null
+    : outcome === 'recorded'
+      ? `${friendCount} added to Reminders — track payments there`
+      : outcome === 'resplit'
+        ? `Already paid, so you were not charged again. This bill's split now shows the ${friendCount} you just confirmed.`
+        : outcome === 'settled'
+          ? 'Already paid, and someone has started settling up — this bill’s split was left as it is.'
+          : `Already paid — this bill and its ${friendCount} are in Reminders.`;
+
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-success/10 to-white">
       <div className="flex flex-col items-center justify-center flex-1 px-5 py-4">
@@ -126,8 +168,10 @@ export function PaymentSuccessPage() {
         {/* Announced to screen readers the moment the page renders, so the
             outcome of a payment is never conveyed by colour and icon alone. */}
         <p role="status" aria-live="assertive" className="sr-only">
-          Payment successful. You paid ${amount.toFixed(2)} to {merchantName}.
-          {friends.length > 0 && ` ${friends.length} ${friends.length === 1 ? 'friend has' : 'friends have'} been added to reminders.`}
+          {outcome === 'recorded'
+            ? `Payment successful. You paid $${amount.toFixed(2)} to ${merchantName}.`
+            : `This payment of $${amount.toFixed(2)} to ${merchantName} was already recorded.`}
+          {splitNote && ` ${splitNote}`}
         </p>
 
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', duration: 0.5 }} className="w-16 h-16 rounded-full bg-gradient-to-br from-success to-green-400 flex items-center justify-center mb-3 shadow-xl">
@@ -135,7 +179,7 @@ export function PaymentSuccessPage() {
         </motion.div>
 
         <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="text-2xl font-bold text-foreground mb-1">
-          Bill Paid!
+          {outcome === 'recorded' ? 'Bill Paid!' : 'Already Paid'}
         </motion.h1>
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="text-sm text-muted-foreground mb-4">
           You paid ${amount.toFixed(2)} to {merchantName}
@@ -180,14 +224,12 @@ export function PaymentSuccessPage() {
           </div>
         </motion.div>
 
-        {friends.length > 0 && (
+        {splitNote && (
           <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="w-full mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
               <Bell className="w-4 h-4 text-white" />
             </div>
-            <p className="text-xs text-blue-900">
-              <span className="font-bold">{friends.length} {friends.length === 1 ? 'friend' : 'friends'}</span> added to Reminders — track payments there
-            </p>
+            <p className="text-xs text-blue-900">{splitNote}</p>
           </motion.div>
         )}
 

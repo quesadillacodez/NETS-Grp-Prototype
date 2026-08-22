@@ -37,7 +37,6 @@ import {
   isWithinRadius, proximityTo,
 } from '../utils/geo';
 import { LocationBanner, LocationSheet } from '../components/LocationPicker';
-import { createPaymentId } from '../utils/paymentFlow';
 import { useAppEvents } from '../utils/useAppEvents';
 
 const CATEGORY_LABELS: Record<ActivityCategory | 'all', string> = {
@@ -756,7 +755,6 @@ export function HangoutsPage() {
       <AnimatePresence>{selected && <ActivityDetail activity={selected} saved={savedIds.includes(selected.id)} onSave={() => save(selected.id)} onPlan={() => startPlan([selected.id, ...savedIds])} onClose={() => setSelected(null)} />}</AnimatePresence>
       <AnimatePresence>{showCreate && <CreateHangoutSheet initialIds={createSeed} activities={activities} ownerId={currentUser.id} onClose={() => setShowCreate(false)} onCreated={id => { setShowCreate(false); refresh(); setTab('plans'); setSelectedPlanId(id); }} />}</AnimatePresence>
       <AnimatePresence>{selectedPlan && <PlanDetail plan={selectedPlan} currentUserId={currentUser.id} onClose={() => setSelectedPlanId(null)} onRefresh={refresh} onPay={(plan, activity) => navigate('/scan', { state: {
-        paymentId: createPaymentId(),
         hangoutId: plan.id,
         participantUserIds: [plan.ownerUserId, ...plan.invitedUserIds],
         amount: activity.pricePerPerson * (plan.invitedUserIds.length + 1),
